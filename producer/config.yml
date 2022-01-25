@@ -1,0 +1,6 @@
+Api:
+  Url: wss://api.tiingo.com/crypto
+  SecretName: TiingoApiToken
+Firehose:
+  StreamName: firehose-jamie-crypto-dev
+  BatchSize: 500
