@@ -1,4 +1,3 @@
-from curses import reset_shell_mode
 import gzip
 import json
 import re
@@ -63,7 +62,7 @@ class TradeUpdateBatch:
     def put_to_stream(self, stream: str) -> None:
         """Puts records to the Kinesis Firehose Stream. If a service error occurs,
         then the put is retried after a delay.
-        
+
         Args:
             stream (str): The name of the Firehose stream.
 
@@ -82,7 +81,9 @@ class TradeUpdateBatch:
                 error_type = e.response["Error"]["Code"]
                 if error_type == "ServiceUnavailableError" and retries < total_retries:
                     retries += 1
-                    logger.warn(f"Service unavailable, initiating retry {retries} of {total_retries}")
+                    logger.warn(
+                        f"Service unavailable, initiating retry {retries} of {total_retries}"
+                    )
                     time.sleep(5)
                 else:
                     logger.error(traceback.format_exc())
@@ -160,7 +161,7 @@ class TiingoSession(WebSocket):
 
     def get_batch(self, size: int) -> TradeUpdateBatch:
         """Creates a batch of trade update messages.
-        
+
         Attributes:
             size (int): The size of the batch.
 
@@ -198,7 +199,7 @@ class TiingoSession(WebSocket):
         response = self.ws.recv()
         record = json.loads(response)
         response_type = record["messageType"]
-        
+
         return (record, response_type)
 
     def _process_response_data(self, data: List[str]) -> _TradeUpdate:
