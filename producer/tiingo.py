@@ -1,3 +1,4 @@
+from curses import reset_shell_mode
 import gzip
 import json
 import re
@@ -6,6 +7,7 @@ import traceback
 from dataclasses import asdict
 from datetime import datetime
 from typing import List, Optional, Tuple
+from urllib import response
 
 import boto3
 from botocore.exceptions import ClientError
@@ -49,19 +51,32 @@ class _TradeUpdate:
 
 
 @dataclass
-class _TradeUpdateBatch:
-    # Holds batches of trade updates.
+class TradeUpdateBatch:
+    """Holds batches of trade updates.
+
+    Attributes:
+        batch (List[_TradeUpdate]): A list of APi response messages.
+    """
+
     batch: List[_TradeUpdate]
 
-    def put_batch_to_stream(self, stream: str) -> None:
-        # Puts records to the Kinesis Firehose Stream. If a service error occurs,
-        # then the put is retried after a delay.
-        compressed_batch = self.compress_message_batch()
+    def put_to_stream(self, stream: str) -> None:
+        """Puts records to the Kinesis Firehose Stream. If a service error occurs,
+        then the put is retried after a delay.
+        
+        Args:
+            stream (str): The name of the Firehose stream.
+
+        Returns:
+            None
+        """
+
+        compressed_batch = self._compress_batch()
         retries = 0
         total_retries = 3
         while retries < total_retries:
             try:
-                self.put_record_to_stream(compressed_batch, stream)
+                self._put_record_to_stream(compressed_batch, stream)
                 break
             except ClientError as e:
                 error_type = e.response["Error"]["Code"]
@@ -73,7 +88,7 @@ class _TradeUpdateBatch:
                     logger.error(traceback.format_exc())
                     raise e
 
-    def compress_message_batch(self) -> bytes:
+    def _compress_batch(self) -> bytes:
         # Converts a list of TradeUpdate dataclasses to a string of new line delimited
         # JSON documents and GZIP compresses the result.
         trade_dicts = [asdict(message) for message in self.batch]
@@ -84,7 +99,7 @@ class _TradeUpdateBatch:
         return gzip.compress(batch_bytes)
 
     @staticmethod
-    def put_record_to_stream(record: bytes, stream: str) -> None:
+    def _put_record_to_stream(record: bytes, stream: str) -> None:
         # Writes a record to a Kinesis Data Firehose Delivery Stream.
         firehose_client = boto3.client("firehose")
         put_record = {"Data": record}
@@ -110,7 +125,7 @@ class TiingoSession(WebSocket):
         self.ws = self._subscribe_and_flush()
 
     def _subscribe_and_flush(self) -> WebSocket:
-        # Subscribes to the crypto API and fluses initial responses.
+        # Subscribes to the crypto API and flushes initial responses.
         ws = WebSocket()
         ws.connect(self.url)
 
@@ -143,12 +158,20 @@ class TiingoSession(WebSocket):
 
         return ws
 
-    def next_trade(self) -> _TradeUpdate:
-        """Returns the next trade from the API.
+    def get_batch(self, size: int) -> TradeUpdateBatch:
+        """Creates a batch of trade update messages.
         
+        Attributes:
+            size (int): The size of the batch.
+
         Returns:
-            TradeUpdate: Next trade message from the API.
+            TradeUpdateBatch: List of messages from the API.
         """
+        batch = [self._next_trade() for _ in range(size)]
+        return TradeUpdateBatch(batch)
+
+    def _next_trade(self) -> _TradeUpdate:
+        # Returns the next trade from the API.
         data, update_type = self._get_response()
 
         # Only return trades, not top-of-book quotes
@@ -159,12 +182,24 @@ class TiingoSession(WebSocket):
 
     def _get_response(self) -> Tuple[List[str], str]:
         # Returns the next API response and the update type.
-        response = self.ws.recv()
-        record = json.loads(response)
+        record, response_type = self._filter_response_type()
+
+        while response_type != "A":
+            record, response_type = self._filter_response_type()
+
         data = record["data"]
         update_type = data[0]
 
         return (data, update_type)
+
+    def _filter_response_type(self) -> Tuple[dict, str]:
+        # Extract the message type from the API response and return it
+        # along with the response itself.
+        response = self.ws.recv()
+        record = json.loads(response)
+        response_type = record["messageType"]
+        
+        return (record, response_type)
 
     def _process_response_data(self, data: List[str]) -> _TradeUpdate:
         # Creates a TradeUpdateMessage dataclass from a data array.
@@ -184,7 +219,7 @@ class TiingoSession(WebSocket):
     def _process_date(date: str, format_in: str, format_out: str) -> str:
         # Trade timestamps returned from the Tiingo API have a standard format
         # except in instances where the microsecond, "%f", part is zero, in
-        # which case it is ommmitted. In this case, the method adds the correct
+        # which case it is omitted. In this case, the method adds the correct
         # ".000000" part to the timestamp.
         try:
             date_dt = datetime.strptime(date, format_in)
@@ -195,15 +230,3 @@ class TiingoSession(WebSocket):
             date_dt = datetime.strptime(f"{first_part}{f_part}{last_part}", format_in)
 
         return datetime.strftime(date_dt, format_out)
-
-    def create_batch(self, size: int) -> _TradeUpdateBatch:
-        """Creates a batch of trade update messages.
-        
-        Attributes:
-            size (int): The size of the batch.
-
-        Returns:
-            TradeUpdateBatch: List of messages from the API.
-        """
-        batch = [self.next_trade() for _ in range(size)]
-        return _TradeUpdateBatch(batch)

@@ -1,5 +1,4 @@
 import traceback
-from dataclasses import asdict
 
 import yaml
 from botocore.exceptions import ClientError
@@ -10,8 +9,8 @@ from tiingo import TiingoSession, TiingoSubscribeError
 
 def main() -> None:
     logger = helpers.create_logger("main")
-    
-    logger.info("Reading YAML config and extracting variables.")
+
+    logger.info("Reading YAML config and extracting variables...")
     with open("config.yml", "r") as stream:
         config = yaml.safe_load(stream)
 
@@ -21,25 +20,24 @@ def main() -> None:
     batch_size = config["Firehose"]["BatchSize"]
 
     try:
-        logger.info("Getting API token from Secrets Manager.")
+        logger.info("Getting API token from Secrets Manager...")
         token = helpers.get_secrets_manager_secret(secret_name)
     except ClientError as e:
         logger.error(traceback.format_exc())
         raise e
 
     try:
-        logger.info("Connecting to Tiingo websocket crypto API.")
+        logger.info("Connecting to Tiingo websocket crypto API...")
         session = TiingoSession(url, token)
     except TiingoSubscribeError as e:
         logger.error(traceback.format_exc())
         raise e
 
+    logger.info("Beginning stream...")
     while True:
-        batch = [session.next_trade() for _ in range(batch_size)]
-        compressed_batch = helpers.compress_message_batch(batch)
-
+        batch = session.get_batch(batch_size)
         try:
-            helpers.put_record_to_firehose(firehose_stream_name, compressed_batch)
+            batch.put_to_stream(firehose_stream_name)
         except ClientError as e:
             logger.error(traceback.format_exc())
             raise e
