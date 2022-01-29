@@ -1,12 +1,24 @@
 import base64
-import gzip
-import json
+import logging
 from dataclasses import asdict
-from typing import List
+from logging import Logger
 
 import boto3
 
-from tiingo_session import TradeUpdateMessage
+
+def create_logger(name: str) -> Logger:
+    logger = logging.getLogger(name)
+    logger.setLevel(logging.INFO)
+
+    formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+
+    consoleHandler = logging.StreamHandler()
+    consoleHandler.setFormatter(formatter)
+    consoleHandler.setLevel(logging.INFO)
+
+    logger.addHandler(consoleHandler)
+    
+    return logger
 
 
 def get_secrets_manager_secret(name: str) -> str:
@@ -25,36 +37,3 @@ def get_secrets_manager_secret(name: str) -> str:
     secret_binary = secret_dict.get("SecretBinary")
 
     return secret_string if secret_string else base64.b64decode(secret_binary)
-
-
-def put_record_to_firehose(stream_name: str, record: bytes) -> None:
-    """Writes a record to a Kinesis Data Firehose Delivery Stream.
-
-    Args:
-      stream_name (str): The name of the Firehose stream
-      batch (bytes): A compressed bytes object of JSON messages
-
-    Returns:
-      None
-    """
-    firehose_client = boto3.client("firehose")
-    put_record = {"Data": record}
-    firehose_client.put_record(DeliveryStreamName=stream_name, Record=put_record)
-
-
-def compress_message_batch(batch: List[TradeUpdateMessage]) -> bytes:
-    """Converts a list of TradeUpdateMessage dataclasses to a string of new line delimited
-    JSON documents and GZIP compresses the result.
-
-    Args:
-      batch (List[TradeUpdateMessage]): List of messages from the API.
-
-    Returns:
-      bytes: compressed string of JSON records.
-    """
-    batch_dicts = [asdict(message) for message in batch]
-    batch_strings = [json.dumps(message) for message in batch_dicts]
-    new_line_delimited = "\n".join(batch_strings) + "\n"
-    batch_bytes = new_line_delimited.encode("utf-8")
-
-    return gzip.compress(batch_bytes)
