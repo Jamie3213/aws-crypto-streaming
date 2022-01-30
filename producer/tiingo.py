@@ -148,15 +148,6 @@ class TiingoSession(WebSocket):
             error = f"Failed with error code {response_code} and message '{response_message}'."
             raise TiingoSubscribeError(error)
 
-        # Get the heartbeat response
-        next_response = json.loads(ws.recv())["response"]
-        next_response_code = next_response["code"]
-        next_response_message = next_response["message"]
-
-        if next_response_code != 200:
-            error = f"Failed with error code {next_response_code} and message '{next_response_message}'."
-            raise TiingoSubscribeError(error)
-
         return ws
 
     def get_batch(self, size: int) -> TradeUpdateBatch:
