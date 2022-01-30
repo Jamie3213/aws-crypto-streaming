@@ -219,7 +219,7 @@ class TiingoSession(WebSocket):
         except ValueError:
             first_part = date_as_string[:19]
             last_part = date_as_string[19:]
-            f_part = ".000000"
+            f_part = f".{6 * '0'}"
             date_as_datetime = datetime.strptime(f"{first_part}{f_part}{last_part}", format_in)
 
         return datetime.strftime(date_as_datetime, format_out)
