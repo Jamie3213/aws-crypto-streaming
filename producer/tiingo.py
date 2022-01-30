@@ -213,7 +213,7 @@ class TiingoSession(WebSocket):
         # Trade timestamps returned from the Tiingo API have a standard format
         # except in instances where the microsecond, "%f", part is zero, in
         # which case it is omitted. In this case, the method adds the correct
-        # ".000000" part to the timestamp.
+        # a zero "%f" part to the timestamp.
         try:
             date_as_datetime = datetime.strptime(date_as_string, format_in)
         except ValueError:
