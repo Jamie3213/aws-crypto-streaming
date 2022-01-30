@@ -145,8 +145,9 @@ class TiingoSession(WebSocket):
         response_message = response["message"]
 
         if response_code != 200:
-            error = f"Failed with error code {response_code} and message '{response_message}'."
-            raise TiingoSubscribeError(error)
+            raise TiingoSubscribeError(
+                f"Failed with error code {response_code} and message '{response_message}'."
+            )
 
         return ws
 
@@ -208,17 +209,17 @@ class TiingoSession(WebSocket):
         return _TradeUpdate(ticker, formatted_date, float(price), now)
 
     @staticmethod
-    def _process_date(date: str, format_in: str, format_out: str) -> str:
+    def _process_date(date_as_string: str, format_in: str, format_out: str) -> str:
         # Trade timestamps returned from the Tiingo API have a standard format
         # except in instances where the microsecond, "%f", part is zero, in
         # which case it is omitted. In this case, the method adds the correct
         # ".000000" part to the timestamp.
         try:
-            date_dt = datetime.strptime(date, format_in)
+            date_as_datetime = datetime.strptime(date_as_string, format_in)
         except ValueError:
-            first_part = date[:19]
-            last_part = date[19:]
+            first_part = date_as_string[:19]
+            last_part = date_as_string[19:]
             f_part = ".000000"
-            date_dt = datetime.strptime(f"{first_part}{f_part}{last_part}", format_in)
+            date_as_datetime = datetime.strptime(f"{first_part}{f_part}{last_part}", format_in)
 
-        return datetime.strftime(date_dt, format_out)
+        return datetime.strftime(date_as_datetime, format_out)
