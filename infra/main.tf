@@ -172,6 +172,7 @@ resource "aws_kinesis_firehose_delivery_stream" "firehose" {
     buffer_interval    = 60
     buffer_size        = 5
     compression_format = "UNCOMPRESSED"
+    prefix             = "bronze/${var.project}/"
 
     cloudwatch_logging_options {
       enabled         = true

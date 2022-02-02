@@ -4,7 +4,7 @@ import yaml
 from botocore.exceptions import ClientError
 
 import helpers
-from tiingo import TiingoSession, TiingoSubscribeError
+from tiingo import TiingoClient, TiingoSubscribeError
 
 
 def main() -> None:
@@ -28,16 +28,17 @@ def main() -> None:
 
     try:
         logger.info("Connecting to Tiingo websocket crypto API...")
-        session = TiingoSession(url, token)
+        session = TiingoClient(url, token)
     except TiingoSubscribeError as e:
         logger.error(traceback.format_exc())
         raise e
 
     logger.info("Beginning stream...")
     while True:
-        batch = session.get_batch(batch_size)
+        batch = session.get_next_batch(batch_size)
         try:
             batch.put_to_stream(firehose_stream_name)
+            logger.info(f"Successfully put batch of size {batch_size} to stream '{firehose_stream_name}'.")
         except ClientError as e:
             logger.error(traceback.format_exc())
             raise e

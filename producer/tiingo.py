@@ -5,9 +5,10 @@ import json
 import re
 import time
 import traceback
+from collections.abc import Iterable
 from dataclasses import asdict
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, Dict, Literal, Optional, Tuple, TypedDict
 
 import boto3
 from botocore.exceptions import ClientError
@@ -19,6 +20,78 @@ import helpers
 
 
 logger = helpers.create_logger("tiingo")
+
+# -------------------------------- New classes ------------------------------- #
+
+
+class _Message:
+    # Holds the response message from the Tiingo API.
+    def __init__(self, raw_message: str):
+        self.raw_message: str = raw_message
+        self.serialized_message: Dict[str, Any] = json.loads(self.raw_message)
+        self.message_type: Literal["I", "H", "A"] = self.serialized_message["messageType"]
+
+    def parse_raw_message(self) -> _SubscriptionMessage | _HeartbeatMessage | _TradeMessage:
+        # Convert the raw message into one of three allowable message types.
+        Switch = TypedDict(
+            "Switch",
+            {"I": _SubscriptionMessage, "H": _HeartbeatMessage, "A": _TradeMessage},
+        )
+
+        switch: Switch = {
+            "I": self.parse_subscription_message(),
+            "H": self.parse_heartbeat_message(),
+            "A": self.parse_trade_message()
+        }
+
+        return switch[self.message_type]
+
+    def parse_subscription_message(self) -> _SubscriptionMessage:
+        data = self.serialized_message["data"]
+        response = self.serialized_message["response"]
+        subscription_id = data["subscription_id"]
+
+        return _SubscriptionMessage(
+            subscription_id,
+            _Response(response["message"], response["code"])
+        )
+
+    def parse_heartbeat_message(self) -> _HeartbeatMessage:
+        response = self.serialized_message["response"]
+
+        return _HeartbeatMessage(
+            _Response(response["message"], response["code"])
+        )
+
+    def parse_trade_message(self) -> _TradeMessage:
+        service = self.serialized_message["service"]
+        data = self.serialized_message["data"]
+        trade_data = TradeData(*data[1:])
+        
+        return _TradeMessage(service, trade_data)
+
+
+@dataclass
+class _SubscriptionMessage:
+    subscription_id: int
+    response: _Response
+
+
+@dataclass
+class _Response:
+    message: str
+    code: int
+
+
+@dataclass
+class _HeartbeatMessage:
+    response: _Response
+
+
+@dataclass
+class _TradeMessage:
+    service: Literal["crypto_data"]
+    data: TradeData
 
 
 @dataclass
@@ -69,11 +142,13 @@ class TiingoClient(WebSocket):
 
     def __init__(self, url: str, token: str):
         """Inits the client and subscribes to the specified API endpoint.
-        
+
         Attributes:
             url (str): The API URL.
             token (str): The API auth token that should be used to subscribe to the API.
         """
+
+        super().__init__()
 
         self._token: str = token
         self._url: str = url
@@ -85,7 +160,7 @@ class TiingoClient(WebSocket):
         # Subscribes to the API using the instance auth token.
         subscribe = {
             "eventName": "subscribe",
-            "authorization": self.token,
+            "authorization": self._token,
             "eventData": {"thresholdLevel": 5},
         }
 
@@ -95,7 +170,7 @@ class TiingoClient(WebSocket):
         # Get the subscription response.
         record = json.loads(self.recv())
         message_type = record["messageType"]
-        
+
         if message_type != "I":
             raise TiingoSubscribeError(
                 f"Expected message type 'I' but found '{message_type}'."
@@ -108,15 +183,14 @@ class TiingoClient(WebSocket):
                 f"Failed with error code {response_code} and message '{response_message}'."
             )
 
-    def next_trade(self) -> TradeData:
+    def get_next_trade(self) -> TradeData:
         """Returns the next trade message from the API."""
-        record = json.loads(self.recv())
-        message_type = record["messageType"]
+        message_type, message = self._get_next_message()
 
-        if message_type == "H":
-            self.next_trade()
-        
-        _, ticker, date, exchange, size, price = record["data"]
+        while message_type == "H":
+            message_type, message = self._get_next_message()
+
+        _, ticker, date, exchange, size, price = message["data"]
 
         output_format = "%Y-%m-%dT%H:%M:%S.%fZ"
         api_format = "%Y-%m-%dT%H:%M:%S.%f%z"
@@ -124,14 +198,13 @@ class TiingoClient(WebSocket):
         formatted_date = self._process_date(date, api_format, output_format)
         now = datetime.strftime(datetime.utcnow(), output_format)
 
-        return TradeData(
-            ticker,
-            formatted_date,
-            exchange,
-            size,
-            price,
-            now
-        )
+        return TradeData(ticker, formatted_date, exchange, size, price, now)
+
+    def _get_next_message(self) -> Tuple[str, Dict[str, Any]]:
+        message = json.loads(self.recv())
+        message_type = message["messageType"]
+
+        return (message_type, message)
 
     @staticmethod
     def _process_date(date_as_string: str, format_in: str, format_out: str) -> str:
@@ -145,20 +218,32 @@ class TiingoClient(WebSocket):
             first_part = date_as_string[:19]
             last_part = date_as_string[19:]
             f_part = f".{6 * '0'}"
-            date_as_datetime = datetime.strptime(f"{first_part}{f_part}{last_part}", format_in)
+            date_as_datetime = datetime.strptime(
+                f"{first_part}{f_part}{last_part}", format_in
+            )
 
         return datetime.strftime(date_as_datetime, format_out)
+
+    def get_next_batch(self, size: int) -> TradeBatch:
+        """Creates a batch of trade update messages.
+        Attributes:
+            size (int): The size of the batch.
+        Returns:
+            TradeBatch: List of messages from the API.
+        """
+        batch = (self.get_next_trade() for _ in range(size))
+        return TradeBatch(batch)
 
 
 class TradeBatch:
     """Holds batches of trade updates.
 
     Attributes:
-        batch (List[_TradeUpdate]): A list of APi response messages.
+        batch (Iterable[Trade]): An Iterable of Trades from the API.
     """
 
     def __init__(self, batch):
-        self.batch: List[TradeData] = batch
+        self.batch: Iterable[TradeData] = batch
 
     def put_to_stream(self, stream: str) -> None:
         """Puts records to the Kinesis Firehose Stream. If a service error occurs,
