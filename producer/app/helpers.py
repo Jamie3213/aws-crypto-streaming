@@ -1,6 +1,5 @@
 import base64
 import logging
-from dataclasses import asdict
 from logging import Logger
 
 import boto3
