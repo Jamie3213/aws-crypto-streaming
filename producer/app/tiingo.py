@@ -7,7 +7,7 @@ import traceback
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass
 from datetime import datetime
-from typing import List, Literal
+from typing import List
 
 import boto3
 from botocore.exceptions import ClientError
@@ -23,6 +23,10 @@ class _BaseMessage(ABC):
     # Holds the response message from the Tiingo API.
     def __init__(self, raw_message: str) -> None:
         self._raw_message = raw_message
+        self._load()
+
+    def _load(self) -> None:
+        # Loads the JSON string as a dictionary.
         self.serialized_message = json.loads(self._raw_message)
 
     @abstractmethod
