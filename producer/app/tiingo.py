@@ -7,131 +7,150 @@ import traceback
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass
 from datetime import datetime
-from typing import List
+from typing import Any, Dict, List
 
-import boto3
 from botocore.exceptions import ClientError
 from websocket import WebSocket
 
-import helpers
+from helpers import _put_record_to_kinesis_stream, _ensure_date
+from logger import create_logger
+
+logger = create_logger("tiingo")
 
 
-logger = helpers.create_logger("tiingo")
-
-
-class _BaseMessage(ABC):
-    # Holds the response message from the Tiingo API.
-    def __init__(self, raw_message: str) -> None:
-        self._raw_message = raw_message
-        self._load()
-
-    def _load(self) -> None:
-        # Loads the JSON string as a dictionary.
-        self.serialized_message = json.loads(self._raw_message)
+class _MessageParser(ABC):
+    # Abstract base class defining a parser class from API messages.
+    def __init__(self, message: Dict[Any]) -> None:
+        self.message = message
 
     @abstractmethod
     def parse(self) -> None:
         pass
 
 
-class _SubscriptionMessage(_BaseMessage):
-    # Represents a subscription confirmation response from the API.
-    def __init__(self, raw_message: str) -> None:
-        super().__init__(raw_message)
-        self.parse()
-    
+class ErrorMessageParser(_MessageParser):
+    """Represents an error response from the API."""
+
+    def __init__(self, message: Dict[Any]) -> None:
+        super().__init__(message)
+
     def parse(self) -> None:
-        # Sets class attributes from the serialized API response.
-        data = self.serialized_message["data"]
         response = self.serialized_message["response"]
-        self.subscription_id = data["subscriptionId"]
-        self.response = _Response(response["message"], response["code"])
-
-
-class _HeartbeatMessage(_BaseMessage):
-    # Represents a heartbeat response from the API.
-    def __init__(self, raw_message: str) -> None:
-        super().__init__(raw_message)
-        self.parse()
-
-    def parse(self) -> None:
-        # Sets class attributes from the serialized API response.
-        response = self.serialized_message["response"]
-        self.response = _Response(response["message"], response["code"])
-
-
-class _TradeMessage(_BaseMessage):
-    # Represents a trade update response from the API.
-    def __init__(self, raw_message: str) -> None:
-        super().__init__(raw_message)
-        self.parse()
-
-    def parse(self) -> None:
-        # Sets class attributes from the serialized API response.
-        _, ticker, date, exchange, size, price = self.serialized_message["data"]
-        
-        date_format_in = "%Y-%m-%dT%H:%M:%S.%f%z"
-        date_format_out = "%Y-%m-%dT%H:%M:%S.%fZ"
-        formatted_date = self._ensure_date(date, date_format_in, date_format_out)
-        
-        self.service = self.serialized_message["service"]
-        self.trade_data = TradeData(
-            ticker,
-            formatted_date,
-            exchange,
-            size,
-            price
+        code = response["code"]
+        message = response["message"]
+        raise TiingoClientError(
+            f"API call failed with error code {code} and error message '{message}'"
         )
 
-    @staticmethod
-    def _ensure_date(date_as_string: str, format_in: str, format_out: str) -> str:
-        # Trade timestamps returned from the Tiingo API have a standard format
-        # except in instances where the microsecond, "%f", part is zero, in
-        # which case it is omitted. In this case, the method adds the correct
-        # a zero "%f" part to the timestamp.
-        try:
-            date_as_datetime = datetime.strptime(date_as_string, format_in)
-        except ValueError:
-            first_part = date_as_string[:19]
-            last_part = date_as_string[19:]
-            f_part = f".{6 * '0'}"
-            date_as_datetime = datetime.strptime(
-                f"{first_part}{f_part}{last_part}", format_in
-            )
 
-        return datetime.strftime(date_as_datetime, format_out)
+class HeartbeatMessageParser(_MessageParser):
+    """Represents a heartbeat response from the API."""
+
+    def __init__(self, message: Dict[Any]) -> None:
+        super().__init__(message)
+
+    def parse(self) -> HeartbeatMessage:
+        # Sets instance attributes from the serialized API response.
+        response = self.serialized_message["response"]
+        return HeartbeatMessage(response["code"], response["message"])
 
 
 @dataclass
-class _Response:
-    message: str
-    code: int
+class HeartbeatMessage:
+    response_code: int
+    response_message: str
+
+
+class SubscriptionMessageParser(_MessageParser):
+    """Represents a subscription confirmation response from the API."""
+
+    def __init__(self, message: Dict[Any]) -> None:
+        super().__init__(message)
+
+    def parse(self) -> SubscriptionMessage:
+        # Sets instance attributes from the serialized API response.
+        data = self.serialized_message.get("data")
+        response = self.serialized_message["response"]
+        return SubscriptionMessage(
+            data["subscriptionId"], response["code"], response["message"]
+        )
+
+
+@dataclass
+class SubscriptionMessage:
+    subscription_id: int
+    response_code: int
+    response_message: str
+
+
+class TradeMessageParser(_MessageParser):
+    """Represents a trade update response from the API."""
+
+    def __init__(self, message: Dict[Any]) -> None:
+        super().__init__(message)
+
+    def parse(self) -> TradeMessage:
+        # Sets instance attributes from the serialized API response.
+        _, ticker, date, exchange, size, price = self.serialized_message["data"]
+
+        date_format_in = "%Y-%m-%dT%H:%M:%S.%f%z"
+        date_format_out = "%Y-%m-%dT%H:%M:%S.%fZ"
+        formatted_date = _ensure_date(date, date_format_in, date_format_out)
+
+        service = self.serialized_message["service"]
+        trade_data = TradeData(ticker, formatted_date, exchange, size, price)
+        return TradeMessage(service, trade_data)
+
+
+@dataclass
+class TradeMessage:
+    service: str
+    trade_data: TradeData
 
 
 @dataclass
 class TradeData:
-    """Trade data extracted from the API response message.
-
-    Attibutes:
-        ticker (str): The ticker for the crypto asset.
-        date (str): The trade execution timestamp.
-        exchange (str): The exchange on which the trade took place.
-        size (float): The volume done at the last price.
-        price (float): The price the trade was executed at.
-        processed_at (str): Timestamp when the record was processed by the application.
-    """
-
-    now = datetime.strftime(datetime.utcnow(), "%Y-%m-%dT%H:%M:%S.%fZ")
-
     ticker: str
     date: str
     exchange: str
     size: float
     price: float
-    processed_at: str = now
+    processed_at: str = datetime.strftime(datetime.utcnow(), "%Y-%m-%dT%H:%M:%S.%fZ")
 
 
-class TiingoSubscribeError(Exception):
+class MessageParserFactory:
+    """Factory to create message parsers from API messages..
+
+    Attributes:
+        raw_message (str): The raw string response returned from the API.
+    """
+
+    def __init__(self, raw_message: str) -> None:
+        self._raw_message = raw_message
+        self._load()
+        self._set_type()
+
+    def _load(self) -> None:
+        # Loads the raw JSON string into a dictionary
+        self._serialized_message = json.loads(self._raw_message)
+
+    def _set_type(self) -> None:
+        # Extracts the message type from the serialize message.
+        self._message_type = self.serialized_message["messageType"]
+
+    def get_parser(self) -> _MessageParser:
+        """Uses the message type to determine the correct message sub-class to instantiate."""
+        factory = {
+            "E": ErrorMessageParser,
+            "H": HeartbeatMessageParser,
+            "I": SubscriptionMessageParser,
+            "A": TradeMessageParser,
+        }
+        parser = factory[self._message_type]
+        return parser(self._serialized_message)
+
+
+class TiingoClientError(Exception):
     pass
 
 
@@ -145,18 +164,9 @@ class TiingoClient(WebSocket):
     """
 
     def __init__(self, url: str, token: str):
-        """Inits the client and subscribes to the specified API endpoint.
-
-        Attributes:
-            url (str): The API URL.
-            token (str): The API auth token that should be used to subscribe to the API.
-        """
-
         super().__init__()
-
         self._token = token
         self._url = url
-
         self.connect(self._url)
         self._subscribe()
 
@@ -170,69 +180,73 @@ class TiingoClient(WebSocket):
 
         self.send(json.dumps(subscribe))
 
-        # Get the subscription response.
-        subscription_message = _SubscriptionMessage(self.recv())
-        if subscription_message.response.code != 200:
-            raise TiingoSubscribeError(
-                f"""Failed with error code {subscription_message.response.code} 
-                and message '{subscription_message.response.message}'."""
-            )
+        # Get the subscription response to make sure no errors occurred.
+        raw_message = self.recv()
+        MessageParserFactory(raw_message).get_parser().parse()
 
     def get_next_trade(self) -> TradeData:
         """Returns the next trade message from the API."""
         message = self._get_next_message()
-        
-        while isinstance(message, _HeartbeatMessage):
+
+        while isinstance(message, HeartbeatMessage):
             message = self._get_next_message()
 
         return message.trade_data
 
-    def _get_next_message(self) -> _TradeMessage | _HeartbeatMessage:
-        # Gets the next message from the API, either trade update or heartbeat.
+    def _get_next_message(self) -> HeartbeatMessage | TradeMessage:
+        # Gets the next message from the API.
         raw_message = self.recv()
-        try:
-            return _TradeMessage(raw_message)
-        except KeyError:
-            return _HeartbeatMessage(raw_message)
+        next_message = MessageParserFactory(raw_message) \
+            .get_parser() \
+            .parse()
+            
+        return next_message
 
     def get_next_batch(self, size: int) -> TradeBatch:
-        """Creates a batch of trade update messages.
-        Attributes:
-            size (int): The size of the batch.
-        Returns:
-            TradeBatch: List of messages from the API.
-        """
+        """Creates a batch of trade update messages."""
         batch = [self.get_next_trade() for _ in range(size)]
         return TradeBatch(batch)
 
 
 class TradeBatch:
-    """Holds batches of trade updates.
-
+    """Holds batches of trade updates in a list.
+    
     Attributes:
-        batch (Iterable[Trade]): An Iterable of Trades from the API.
+        batch (List[TradeData]): Batch of trade messages as a list of TradeData classes.
     """
 
     def __init__(self, batch: List[TradeData]):
         self.batch = batch
 
-    def put_to_stream(self, stream: str) -> None:
-        """Puts records to the Kinesis Firehose Stream. If a service error occurs,
-        then the put is retried after a delay.
-
-        Args:
-            stream (str): The name of the Firehose stream.
-
-        Returns:
-            None
+    def compress_batch(self) -> RecordWriter:
         """
+        Converts a list of TradeUpdate dataclasses to a string of new line delimited
+        JSON documents and GZIP compresses the result.
+        """
+        trade_dicts = [asdict(message) for message in self.batch]
+        json_strings = [json.dumps(dict_) for dict_ in trade_dicts]
+        new_line_delimited = "\n".join(json_strings) + "\n"
+        batch_bytes = new_line_delimited.encode("utf-8")
+        compressed_record = gzip.compress(batch_bytes)
+        return RecordWriter(compressed_record)
 
-        compressed_batch = self._compress_batch()
+
+class RecordWriter:
+    """Contains functionality to write a record to a destination, e.g. Kinesis Data Firehose."""
+
+    def __init__(self, record: bytes) -> None:
+        self.record = record
+
+    def put_to_kinesis_stream(self, stream: str) -> None:
+        """
+        Puts records to the Kinesis Firehose Stream. If a service error occurs,
+        then the put is retried after a delay.
+        """
         retries = 0
         total_retries = 3
         while retries < total_retries:
             try:
-                self._put_record_to_stream(compressed_batch, stream)
+                _put_record_to_kinesis_stream(self.record, stream)
                 break
             except ClientError as e:
                 error_type = e.response["Error"]["Code"]
@@ -245,20 +259,3 @@ class TradeBatch:
                 else:
                     logger.error(traceback.format_exc())
                     raise e
-
-    def _compress_batch(self) -> bytes:
-        # Converts a list of TradeUpdate dataclasses to a string of new line delimited
-        # JSON documents and GZIP compresses the result.
-        trade_dicts = [asdict(message) for message in self.batch]
-        json_strings = [json.dumps(dict_) for dict_ in trade_dicts]
-        new_line_delimited = "\n".join(json_strings) + "\n"
-        batch_bytes = new_line_delimited.encode("utf-8")
-
-        return gzip.compress(batch_bytes)
-
-    @staticmethod
-    def _put_record_to_stream(record: bytes, stream: str) -> None:
-        # Writes a record to a Kinesis Data Firehose Delivery Stream.
-        firehose_client = boto3.client("firehose")
-        put_record = {"Data": record}
-        firehose_client.put_record(DeliveryStreamName=stream, Record=put_record)
