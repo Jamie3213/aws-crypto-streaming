@@ -18,17 +18,49 @@ from logger import create_logger
 logger = create_logger("tiingo")
 
 
+class MessageParserFactory:
+    """Factory to create message parsers from API messages..
+
+    Attributes:
+        raw_message (str): The raw string response returned from the API.
+    """
+
+    def __init__(self, raw_message: str) -> None:
+        self._raw_message = raw_message
+        self._load()
+        self._set_type()
+
+    def _load(self) -> None:
+        # Loads the raw JSON string into a dictionary
+        self.serialized_message = json.loads(self._raw_message)
+
+    def _set_type(self) -> None:
+        # Extracts the message type from the serialize message.
+        self._message_type = self.serialized_message["messageType"]
+
+    def get_parser(self) -> _MessageParser:
+        """Uses the message type to determine the correct message sub-class to instantiate."""
+        factory = {
+            "E": _ErrorMessageParser,
+            "H": _HeartbeatMessageParser,
+            "I": _SubscriptionMessageParser,
+            "A": _TradeMessageParser,
+        }
+        parser = factory[self._message_type]
+        return parser(self.serialized_message)
+
+
 class _MessageParser(ABC):
     # Abstract base class defining a parser class from API messages.
     def __init__(self, message: Dict[Any]) -> None:
-        self.message = message
+        self.serialized_message = message
 
     @abstractmethod
     def parse(self) -> None:
         pass
 
 
-class ErrorMessageParser(_MessageParser):
+class _ErrorMessageParser(_MessageParser):
     """Represents an error response from the API."""
 
     def __init__(self, message: Dict[Any]) -> None:
@@ -43,7 +75,7 @@ class ErrorMessageParser(_MessageParser):
         )
 
 
-class HeartbeatMessageParser(_MessageParser):
+class _HeartbeatMessageParser(_MessageParser):
     """Represents a heartbeat response from the API."""
 
     def __init__(self, message: Dict[Any]) -> None:
@@ -61,7 +93,7 @@ class HeartbeatMessage:
     response_message: str
 
 
-class SubscriptionMessageParser(_MessageParser):
+class _SubscriptionMessageParser(_MessageParser):
     """Represents a subscription confirmation response from the API."""
 
     def __init__(self, message: Dict[Any]) -> None:
@@ -83,7 +115,7 @@ class SubscriptionMessage:
     response_message: str
 
 
-class TradeMessageParser(_MessageParser):
+class _TradeMessageParser(_MessageParser):
     """Represents a trade update response from the API."""
 
     def __init__(self, message: Dict[Any]) -> None:
@@ -116,38 +148,6 @@ class TradeData:
     size: float
     price: float
     processed_at: str = datetime.strftime(datetime.utcnow(), "%Y-%m-%dT%H:%M:%S.%fZ")
-
-
-class MessageParserFactory:
-    """Factory to create message parsers from API messages..
-
-    Attributes:
-        raw_message (str): The raw string response returned from the API.
-    """
-
-    def __init__(self, raw_message: str) -> None:
-        self._raw_message = raw_message
-        self._load()
-        self._set_type()
-
-    def _load(self) -> None:
-        # Loads the raw JSON string into a dictionary
-        self._serialized_message = json.loads(self._raw_message)
-
-    def _set_type(self) -> None:
-        # Extracts the message type from the serialize message.
-        self._message_type = self.serialized_message["messageType"]
-
-    def get_parser(self) -> _MessageParser:
-        """Uses the message type to determine the correct message sub-class to instantiate."""
-        factory = {
-            "E": ErrorMessageParser,
-            "H": HeartbeatMessageParser,
-            "I": SubscriptionMessageParser,
-            "A": TradeMessageParser,
-        }
-        parser = factory[self._message_type]
-        return parser(self._serialized_message)
 
 
 class TiingoClientError(Exception):
