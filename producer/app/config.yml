@@ -4,3 +4,4 @@ Api:
 Firehose:
   StreamName: firehose-jamie-crypto-stream
   BatchSize: 1000
+  TotalRetries: 3

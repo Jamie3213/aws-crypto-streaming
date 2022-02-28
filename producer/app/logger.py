@@ -2,14 +2,7 @@ import logging
 
 
 def create_logger(name: str) -> logging.Logger:
-    """Create a formatted logger that logs to the console.
-    
-    Attributes:
-        name (str): The name of the logger.
-
-    Returns:
-        Logger: The configured logger.
-    """
+    """Create a formatted logger that logs to the console."""
     logger = logging.getLogger(name)
     logger.setLevel(logging.INFO)
 
