@@ -13,7 +13,7 @@ def get_secrets_manager_secret(name: str) -> str:
 
     return secret_string if secret_string else base64.b64decode(secret_binary)
 
-def _put_record_to_kinesis_stream(record: bytes, stream: str) -> None:
+def put_record_to_kinesis_stream(record: bytes, stream: str) -> None:
     # Writes a record to a Kinesis Data Firehose Delivery Stream.
     firehose_client = boto3.client("firehose")
     put_record = {"Data": record}
