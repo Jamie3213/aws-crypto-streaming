@@ -1,14 +1,40 @@
+import base64
+import logging
 import traceback
 
+import boto3
 import yaml
-from aws_helpers import get_secrets_manager_secret
 from botocore.exceptions import ClientError
 from logger import create_logger
-from tiingo import TiingoClient, TiingoSubscriptionError, TiingoMessageError
+from tiingo import TiingoClient, TiingoClientError, TiingoSubscriptionError
 
 
-def load_config_vars(file: str) -> tuple:
-    with open(file, "r") as stream:
+logger = logging.getLogger("app")
+logger.setLevel(logging.INFO)
+
+formatter = logging.Formatter(
+    "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+
+consoleHandler = logging.StreamHandler()
+consoleHandler.setFormatter(formatter)
+consoleHandler.setLevel(logging.INFO)
+
+logger.addHandler(consoleHandler)
+
+def get_secrets_manager_secret(name: str) -> str:
+    """Returns the secret from AWS Secrets Manager."""
+    secret_client = boto3.client("secretsmanager")
+    secret_dict = secret_client.get_secret_value(SecretId=name)
+
+    secret_string = secret_dict.get("SecretString")
+    secret_binary = secret_dict.get("SecretBinary")
+
+    return secret_string if secret_string else base64.b64decode(secret_binary)
+
+
+def load_config_vars() -> tuple:
+    with open("config.yml", "r") as stream:
         config = yaml.safe_load(stream)
 
     url = config["Api"]["Url"]
@@ -23,9 +49,7 @@ def load_config_vars(file: str) -> tuple:
 def main() -> None:
     logger = create_logger("main")
     logger.info("Reading YAML config and extracting variables...")
-    url, secret_name, stream_name, batch_size, total_retries = load_config_vars(
-        "config.yml"
-    )
+    url, secret_name, stream_name, batch_size, total_retries = load_config_vars()
 
     logger.info("Getting API token from Secrets Manager...")
 
@@ -48,7 +72,7 @@ def main() -> None:
     while True:
         try:
             batch = client.get_next_batch(batch_size)
-        except TiingoMessageError as e:
+        except TiingoClientError as e:
             logger.error(traceback.format_exc())
             raise e
 
