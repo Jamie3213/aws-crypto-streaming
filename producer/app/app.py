@@ -38,7 +38,6 @@ def main() -> None:
 
     try:
         client = TiingoClient(url, token)
-        client.subscribe() 
     except TiingoSubscriptionError as e:
         logger.error(traceback.format_exc())
         raise e
@@ -52,7 +51,7 @@ def main() -> None:
             logger.error(traceback.format_exc())
             raise e
 
-        compressed_batch = batch.compress_batch()
+        compressed_batch = batch.compress()
 
         try:
             compressed_batch.put_to_kinesis_stream(stream_name)

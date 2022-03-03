@@ -6,7 +6,6 @@ from datetime import datetime
 from typing import Any, Callable, Dict, List
 
 import boto3
-from accessify import private
 from botocore.exceptions import ClientError
 from pydantic import validator
 from pydantic.dataclasses import dataclass
@@ -166,7 +165,7 @@ class TradeBatch:
     def __init__(self, batch: List[TradeMessage]) -> None:
         self.batch = batch
 
-    def compress_batch(self) -> CompressedBatch:
+    def compress(self) -> CompressedBatch:
         """
         Converts a list of TradeUpdate dataclasses to a string of new line delimited
         JSON documents and GZIP compresses the result.
@@ -192,26 +191,25 @@ class TiingoClient(WebSocket):
 
     def __init__(self, url: str, token: str):
         super().__init__()
+
         self.url = url
         self.token = token
 
-    @private
-    def make_connection(self) -> None:
+        self._subscribe()
+
+    def _make_connection(self) -> None:
         self.connect(self.url)
 
-    @private
-    def send_payload(self, payload: str) -> None:
+    def _send_payload(self, payload: str) -> None:
         self.send(payload)
 
-    @private
-    def get_record(self) -> TiingoRecord:
+    def _get_record(self) -> TiingoRecord:
         raw_record = self.recv()
         return json.loads(raw_record)
 
-    @private
-    def get_next_message(self) -> Message:
+    def _get_next_message(self) -> Message:
         # Returns the next message from the API.
-        response = self.get_record()
+        response = self._get_record()
         factory = MessageParserFactory()
         parser = factory.create(response)
         next_message = parser.parse(response)
@@ -219,37 +217,36 @@ class TiingoClient(WebSocket):
         try:
             next_message.raise_for_status()
         except TiingoClientError as e:
-            raise TiingoMessageError(e.code, e.message)
+            raise TiingoMessageError(e.code, e.message) from None
 
         return next_message
 
-    @private
-    def validate_subscription(self) -> None:
+    def _validate_subscription(self) -> None:
         # Returns the subscription response from the API after a subscription message has
         # been sent to the API.
         try:
-            self.get_next_message()
+            self._get_next_message()
         except TiingoMessageError as e:
-            raise TiingoSubscriptionError(e.code, e.message)
+            raise TiingoSubscriptionError(e.code, e.message) from None
 
-    def subscribe(self) -> None:
-        # Subscribes to the API using the instance auth token.
+    def _subscribe(self) -> None:
+        """Subscribes to the API using the instance auth token."""
         subscribe = {
             "eventName": "subscribe",
             "authorization": self.token,
             "eventData": {"thresholdLevel": 5},
         }
 
-        self.make_connection()
-        self.send_payload(json.dumps(subscribe))
-        self.validate_subscription()
+        self._make_connection()
+        self._send_payload(json.dumps(subscribe))
+        self._validate_subscription()
 
     def get_next_trade(self) -> TradeMessage:
         """Returns the next trade message from the API."""
-        message = self.get_next_message()
+        message = self._get_next_message()
 
-        while isinstance(message, NonTradeMessage):
-            message = self.get_next_message()
+        while not isinstance(message, TradeMessage):
+            message = self._get_next_message()
 
         return message
 

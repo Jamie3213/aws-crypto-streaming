@@ -1,77 +1,106 @@
-import os
 import sys
-
-
-parent = os.path.abspath(".")
-sys.path.append(os.path.join(parent, "producer", "app"))
-
-
 import unittest
 
-from tiingo import TiingoClient, TiingoSubscribeError
+sys.path.append("..")
+
+from typing import Any, Dict
 from unittest.mock import MagicMock, patch
+
+from app.tiingo import (
+    TiingoClient,
+    TradeMessage,
+    TiingoMessageError,
+    TiingoSubscriptionError,
+)
+
+import data
 
 
 class TestTiingoClient(unittest.TestCase):
-    @patch("tiingo.TiingoClient.recv")
-    @patch("tiingo.TiingoClient.send")
-    @patch("tiingo.TiingoClient.connect")
-    def test_should_correctly_parse_trade_data(
-        self, mock_connect: MagicMock, mock_send: MagicMock, mock_recv: MagicMock
+    """Tests public API of the tiingo module."""
+
+    url = "ws://test.com/test"
+    token = "test_api_token"
+
+    error_record: Dict[str, Any] = data.error
+    heartbeat_record: Dict[str, Any] = data.heartbeat
+    subscription_record: Dict[str, Any] = data.subscription
+    trade_record: Dict[str, Any] = data.trade
+
+
+    @patch("app.tiingo.TiingoClient._get_record")
+    @patch("app.tiingo.TiingoClient._send_payload")
+    @patch("app.tiingo.TiingoClient._make_connection")
+    def test_should_raise_subscription_error(
+        self,
+        mock_make_connection: MagicMock,
+        mock_send_payload: MagicMock,
+        mock_get_record: MagicMock,
     ) -> None:
-        raw_subscription_message = '{"messageType": "I", "response": {"message": "Success", "code": 200}, "data": {"subscriptionId": 1234}}'
-        raw_heartbeat_message = (
-            '{"messageType": "H", "response": {"message": "Success", "code": 200}}'
-        )
-        raw_trade_message = '{"messageType": "A", "service": "crypto_data", "data": ["A", "BTC", "2022-01-01T00:00:00+00:00", "Bitfenix", 123.4, 567.8]}'
+        """Ensure that an exception is raised if the initial API subscription fails."""
 
-        mock_connect.return_value = None
-        mock_send.return_value = 0
-        mock_recv.side_effect = (
-            raw_subscription_message,
-            raw_heartbeat_message,
-            raw_trade_message,
-        )
+        mock_make_connection.return_value = None
+        mock_send_payload.return_value = None
+        mock_get_record.return_value = self.error_record
 
-        url = "ws://test.com/test"
-        token = "test_auth_token"
-        client = TiingoClient(url, token)
+        self.assertRaises(TiingoSubscriptionError, TiingoClient, self.url, self.token)
+
+    @patch("app.tiingo.TiingoClient._get_record")
+    @patch("app.tiingo.TiingoClient._subscribe")
+    def test_should_raise_message_error(
+        self, mock_subscribe: MagicMock, mock_get_record: MagicMock
+    ) -> None:
+        """Ensure that trades are instantiated correctly from the factory."""
+
+        mock_subscribe.return_value = None
+        mock_get_record.return_value = self.error_record
+
+        client = TiingoClient(self.url, self.token)
+
+        self.assertRaises(TiingoMessageError, client.get_next_trade)
+
+    @patch("app.tiingo.TiingoClient._get_record")
+    @patch("app.tiingo.TiingoClient._subscribe")
+    def test_should_instantiate_trade_message(
+        self, mock_subscribe: MagicMock, mock_get_record: MagicMock
+    ) -> None:
+        """Ensure that trades are instantiated correctly from the factory."""
+
+        mock_subscribe.return_value = None
+        mock_get_record.side_effect = (self.subscription_record, self.heartbeat_record, self.trade_record)
+
+        client = TiingoClient(self.url, self.token)
         next_trade = client.get_next_trade()
 
-        trade_values = (
-            next_trade.ticker,
-            next_trade.date,
-            next_trade.exchange,
-            next_trade.size,
-            next_trade.price,
-        )
+        self.assertIsInstance(next_trade, TradeMessage)
 
-        expected_values = (
-            "BTC",
-            "2022-01-01T00:00:00.000000Z",
-            "Bitfenix",
-            123.4,
-            567.8,
-        )
-
-        self.assertEqual(trade_values, expected_values)
     
-    @patch("tiingo.TiingoClient.recv")
-    @patch("tiingo.TiingoClient.send")
-    @patch("tiingo.TiingoClient.connect")
-    def test_should_raise_subscription_error(
-        self, mock_connect: MagicMock, mock_send: MagicMock, mock_recv: MagicMock
+    @patch("app.tiingo.TiingoClient._get_record")
+    @patch("app.tiingo.TiingoClient._subscribe")
+    def test_should_correctly_parse_trade_messages(
+        self, mock_subscribe: MagicMock, mock_get_record: MagicMock
     ) -> None:
-        raw_subscription_message = '{"messageType": "I", "response": {"message": "Failure", "code": 500}, "data": {"subscriptionId": 1234}}'
-        mock_connect.return_value = None
-        mock_send.return_value = 0
-        mock_recv.return_value = raw_subscription_message
+        """Ensure that trades are instantiated correctly from the factory."""
 
-        url = "ws://test.com/test"
-        token = "test_auth_token"
+        mock_subscribe.return_value = None
+        mock_get_record.return_value = self.trade_record
 
-        with self.assertRaises(TiingoSubscribeError):
-            TiingoClient(url, token)
+        dummy_trade_data = self.trade_record["data"]
+
+        ticker = dummy_trade_data[1]
+        date = dummy_trade_data[2]
+        exchange = dummy_trade_data[3]
+        size = dummy_trade_data[4]
+        price = dummy_trade_data[5]
+
+        expected_values = (ticker, f"{str.replace(date, '+00:00', '')}.000000Z", exchange, size, price)
+
+        client = TiingoClient(self.url, self.token)
+        trade = client.get_next_trade()
+        actual_values = (trade.ticker, trade.date, trade.exchange, trade.size, trade.price)
+
+        self.assertEqual(actual_values, expected_values)
+
 
 if __name__ == "__main__":
     unittest.main()
