@@ -18,24 +18,42 @@ class TiingoClientError(Exception):
     def __init__(self, code: int, message: str) -> None:
         self.code = code
         self.message = message
-        super().__init__(f"Failed to get next API message with error {self.code}: '{self.message}'.")
+        super().__init__(
+            f"Failed to get next API message with error {self.code}: '{self.message}'."
+        )
+
+
+class TiingoMessageError(Exception):
+    def __init__(self, code: int, message: str) -> None:
+        self.code = code
+        self.message = message
+        super().__init__(
+            f"Failed to get message with error {self.code}: '{self.message}'."
+        )
 
 
 class TiingoSubscriptionError(Exception):
     def __init__(self, code: int, message: str) -> None:
         self.code = code
         self.message = message
-        super().__init__(f"API subscription failed with error {self.code}: '{self.message}'.")
+        super().__init__(
+            f"API subscription failed with error {self.code}: '{self.message}'."
+        )
 
 
-RawTiingoRecord = str
-SerializedTiingoRecord = Dict[str, Any]
+TiingoRecord = Dict[str, Any]
+
+
+class Message(ABC):
+    @abstractmethod
+    def raise_for_status(self) -> None:
+        pass
 
 
 @dataclass
-class NonTradeMessage:
+class NonTradeMessage(Message):
     code: int
-    message: int
+    message: str
 
     def raise_for_status(self) -> None:
         if self.code != 200:
@@ -43,7 +61,7 @@ class NonTradeMessage:
 
 
 @dataclass
-class TradeMessage:
+class TradeMessage(Message):
     ticker: str
     date: str
     exchange: str
@@ -51,83 +69,86 @@ class TradeMessage:
     price: float
     processed_at: str = datetime.strftime(datetime.utcnow(), "%Y-%m-%dT%H:%M:%S.%fZ")
 
+    def raise_for_status(self) -> None:
+        pass
+
     @validator("date")
     @classmethod
-    @private
     def ensure_timestamp(cls, timestamp) -> str:
         naked_timestamp = str.replace(timestamp, "+00:00", "")
+        format_timestamp = {32: f"{naked_timestamp}Z", 25: f"{naked_timestamp}.000000Z"}
+        return format_timestamp[len(timestamp)]
 
-        match len(naked_timestamp):
-            case 32: corrected_timestamp = f"{naked_timestamp}Z"
-            case _: corrected_timestamp = f"{naked_timestamp}.000000Z"
-
-        return corrected_timestamp
-
-
-Message = NonTradeMessage | TradeMessage
-    
 
 class MessageParser(ABC):
-    @classmethod
+    """
+    Interface representing a class containing functionality to convert serialized API records
+    into type-specific dataclasses.
+    """
+
     @abstractmethod
-    def parse(cls, record: SerializedTiingoRecord) -> Message:
+    def parse(self, record: TiingoRecord) -> Message:
         pass
 
 
 class NonTradeMessageParser(MessageParser):
-    @classmethod
-    def parse(cls, record: SerializedTiingoRecord) -> NonTradeMessage:
-        code = record.serialized["response"]["code"]
-        message = record.serialized["response"]["message"]
+    def parse(self, record: TiingoRecord) -> NonTradeMessage:
+        code = record["response"]["code"]
+        message = record["response"]["message"]
         return NonTradeMessage(code, message)
 
 
 class TradeMessageParser(MessageParser):
-    @classmethod
-    def parse(cls, record: SerializedTiingoRecord) -> TradeMessage:
-        # Returns a trade update message class instance from a serialized API message.
-        _, ticker, date, exchange, size, price = record.serialized["data"]
+    def parse(self, record: TiingoRecord) -> TradeMessage:
+        _, ticker, date, exchange, size, price = record["data"]
         return TradeMessage(ticker, date, exchange, size, price)
 
 
 class MessageParserFactory:
     """Used to pick a message parser dynamically from the message type."""
 
-    def create(self, record: SerializedTiingoRecord) -> MessageParser:
+    def create(self, record: TiingoRecord) -> MessageParser:
         """Returns a parser based on the type of the message provided."""
-        message_type = record.serialized["messageType"]
+        message_type = record["messageType"]
 
-        match message_type:
-            case ["E", "I", "H"]: parser = NonTradeMessageParser
-            case "A": parser = TradeMessageParser
+        factory = {
+            "E": NonTradeMessageParser(),
+            "I": NonTradeMessageParser(),
+            "H": NonTradeMessageParser(),
+            "A": TradeMessageParser(),
+        }
 
-        return parser
+        return factory[message_type]
 
 
-def retry(total_retries: int = 3, delay: int = 5) -> Callable:
-    """ Retries the function if a 'ServiceUnavailableError' is raised, increasing the time
-        between retries as a factor of the number of retries. After the total retries value
-        is exceeded, an error is raised.
+def retry(function: Callable) -> Callable:
     """
-    def decorator(function: Callable):
-        def wrapper(*args, **kwargs) -> None:
-            retries = 0
-            while retries <= total_retries:
-                try:
-                    function(*args, **kwargs)
-                    break
-                except ClientError as e:
-                    error_type = e.response["Error"]["Code"]
-                    if error_type == "ServiceUnavailableError" and retries < total_retries:
-                        retries += 1
-                        time.sleep(retries * delay)
-                    else:
-                        raise e
-        return wrapper
-    return decorator
+    Retries the function if a 'ServiceUnavailableError' is raised, increasing the time
+    between retries as a factor of the number of retries. After the total retries value
+    is exceeded, an error is raised.
+    """
+
+    def wrapper(*args, **kwargs) -> None:
+        total_retries = 3
+        retries = 0
+        while retries <= total_retries:
+            try:
+                function(*args, **kwargs)
+                break
+            except ClientError as e:
+                error_type = e.response["Error"]["Code"]
+                if error_type == "ServiceUnavailableError" and retries < total_retries:
+                    retries += 1
+                    time.sleep(retries * 5)
+                else:
+                    raise e
+
+    return wrapper
 
 
 class CompressedBatch(bytes):
+    """Represents a compressed set of trade update messages."""
+
     def __init__(self, batch: bytes) -> None:
         self.batch = batch
 
@@ -141,6 +162,7 @@ class CompressedBatch(bytes):
 
 class TradeBatch:
     """Holds batches of trade updates in a list."""
+
     def __init__(self, batch: List[TradeMessage]) -> None:
         self.batch = batch
 
@@ -149,7 +171,9 @@ class TradeBatch:
         Converts a list of TradeUpdate dataclasses to a string of new line delimited
         JSON documents and GZIP compresses the result.
         """
-        json_strings = [json.dumps(trade, default=pydantic_encoder) for trade in self.batch]
+        json_strings = [
+            json.dumps(trade, default=pydantic_encoder) for trade in self.batch
+        ]
         new_line_delimited_trades = "\n".join(json_strings)
         encoded_trades = new_line_delimited_trades.encode("utf-8")
         compressed_record = gzip.compress(encoded_trades)
@@ -170,7 +194,6 @@ class TiingoClient(WebSocket):
         super().__init__()
         self.url = url
         self.token = token
-        self.subscribe()
 
     @private
     def make_connection(self) -> None:
@@ -181,16 +204,23 @@ class TiingoClient(WebSocket):
         self.send(payload)
 
     @private
-    def recv_payload(self) -> RawTiingoRecord:
-        return self.recv()
+    def get_record(self) -> TiingoRecord:
+        raw_record = self.recv()
+        return json.loads(raw_record)
 
     @private
     def get_next_message(self) -> Message:
         # Returns the next message from the API.
-        response = self.recv_payload()
+        response = self.get_record()
         factory = MessageParserFactory()
         parser = factory.create(response)
         next_message = parser.parse(response)
+
+        try:
+            next_message.raise_for_status()
+        except TiingoClientError as e:
+            raise TiingoMessageError(e.code, e.message)
+
         return next_message
 
     @private
@@ -199,21 +229,18 @@ class TiingoClient(WebSocket):
         # been sent to the API.
         try:
             self.get_next_message()
-        except TiingoClientError as e:
+        except TiingoMessageError as e:
             raise TiingoSubscriptionError(e.code, e.message)
 
-    @private
     def subscribe(self) -> None:
         # Subscribes to the API using the instance auth token.
         subscribe = {
             "eventName": "subscribe",
             "authorization": self.token,
-            "eventData": {
-                "thresholdLevel": 5
-            },
+            "eventData": {"thresholdLevel": 5},
         }
 
-        self.make_connection(self._url)
+        self.make_connection()
         self.send_payload(json.dumps(subscribe))
         self.validate_subscription()
 
