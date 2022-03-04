@@ -7,7 +7,7 @@ from typing import Any, Callable, Dict, List
 
 import boto3
 from botocore.exceptions import ClientError
-from pydantic import validator
+from pydantic import Field, validator
 from pydantic.dataclasses import dataclass
 from pydantic.json import pydantic_encoder
 from websocket import WebSocket
@@ -40,6 +40,12 @@ class TiingoSubscriptionError(Exception):
         )
 
 
+class TiingoBatchSizeError(Exception):
+    def __init__(self, size: int) -> None:
+        self.size = size
+        super().__init__(f"Batch size must be at least 1, not {size}.")
+
+
 TiingoRecord = Dict[str, Any]
 
 
@@ -59,6 +65,10 @@ class NonTradeMessage(Message):
             raise TiingoClientError(self.code, self.message)
 
 
+def _formatted_utc_now() -> str:
+    return datetime.strftime(datetime.utcnow(), "%Y-%m-%dT%H:%M:%S.%fZ")
+
+
 @dataclass
 class TradeMessage(Message):
     ticker: str
@@ -66,7 +76,7 @@ class TradeMessage(Message):
     exchange: str
     size: float
     price: float
-    processed_at: str = datetime.strftime(datetime.utcnow(), "%Y-%m-%dT%H:%M:%S.%fZ")
+    processed_at: str = Field(default_factory=_formatted_utc_now)
 
     def raise_for_status(self) -> None:
         pass
@@ -76,7 +86,12 @@ class TradeMessage(Message):
     def ensure_timestamp(cls, timestamp) -> str:
         naked_timestamp = str.replace(timestamp, "+00:00", "")
         format_timestamp = {32: f"{naked_timestamp}Z", 25: f"{naked_timestamp}.000000Z"}
-        return format_timestamp[len(timestamp)]
+
+        try:
+            return format_timestamp[len(timestamp)]
+        except KeyError:
+            print(timestamp, naked_timestamp)
+            raise
 
 
 class MessageParser(ABC):
@@ -120,7 +135,7 @@ class MessageParserFactory:
         return factory[message_type]
 
 
-def retry(function: Callable) -> Callable:
+def aws_retry(function: Callable) -> Callable:
     """
     Retries the function if a 'ServiceUnavailableError' is raised, increasing the time
     between retries as a factor of the number of retries. After the total retries value
@@ -151,7 +166,7 @@ class CompressedBatch(bytes):
     def __init__(self, batch: bytes) -> None:
         self.batch = batch
 
-    @retry
+    @aws_retry
     def put_to_kinesis_stream(self, stream: str) -> None:
         """Writes a record to a Kinesis Data Firehose Delivery Stream."""
         firehose_client = boto3.client("firehose")
@@ -159,11 +174,14 @@ class CompressedBatch(bytes):
         firehose_client.put_record(DeliveryStreamName=stream, Record=put_record)
 
 
-class TradeBatch:
+class TradeBatch(list):
     """Holds batches of trade updates in a list."""
 
     def __init__(self, batch: List[TradeMessage]) -> None:
         self.batch = batch
+
+    def __len__(self) -> int:
+        return len(self.batch)
 
     def compress(self) -> CompressedBatch:
         """
@@ -252,5 +270,9 @@ class TiingoClient(WebSocket):
 
     def get_next_batch(self, size: int) -> TradeBatch:
         """Creates a batch of trade update messages."""
-        batch = [self.get_next_trade() for _ in range(size)]
+        if size < 1:
+            raise TiingoBatchSizeError(size)
+        else:
+            batch = [self.get_next_trade() for _ in range(size)]
+
         return TradeBatch(batch)
