@@ -86,12 +86,7 @@ class TradeMessage(Message):
     def ensure_timestamp(cls, timestamp) -> str:
         naked_timestamp = str.replace(timestamp, "+00:00", "")
         format_timestamp = {32: f"{naked_timestamp}Z", 25: f"{naked_timestamp}.000000Z"}
-
-        try:
-            return format_timestamp[len(timestamp)]
-        except KeyError:
-            print(timestamp, naked_timestamp)
-            raise
+        return format_timestamp[len(timestamp)]
 
 
 class MessageParser(ABC):
