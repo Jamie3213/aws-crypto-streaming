@@ -1,11 +1,8 @@
-import traceback
-
 from helpers import get_secrets_manager_secret
 from logger import create_logger
 
 import yaml
 from botocore.exceptions import ClientError
-from logger import create_logger
 from tiingo import TiingoClient, TiingoClientError, TiingoSubscriptionError
 
 
@@ -22,7 +19,7 @@ def load_config_vars() -> tuple:
 
 
 def main() -> None:
-    logger = create_logger("main")
+    logger = create_logger(__name__)
     logger.info("Reading YAML config and extracting variables...")
     url, secret_name, stream_name, batch_size = load_config_vars()
 
@@ -31,7 +28,7 @@ def main() -> None:
     try:
         token = get_secrets_manager_secret(secret_name)
     except ClientError as e:
-        logger.error(traceback.format_exc())
+        logger.exception(e)
         raise e
 
     logger.info("Connecting and subscribing to the Tiingo websocket crypto API...")
@@ -39,7 +36,7 @@ def main() -> None:
     try:
         client = TiingoClient(url, token)
     except TiingoSubscriptionError as e:
-        logger.error(traceback.format_exc())
+        logger.exception(e)
         raise e
 
     logger.info("Beginning stream...")
@@ -48,18 +45,16 @@ def main() -> None:
         try:
             batch = client.get_next_batch(batch_size)
         except TiingoClientError as e:
-            logger.error(traceback.format_exc())
+            logger.exception(e)
             raise e
 
         compressed_batch = batch.compress()
 
         try:
             response = compressed_batch.put_to_kinesis_stream(stream_name)
-            logger.info(
-                f"Successfully put batch {response.record_id!r} of size {batch_size} to stream {stream_name!r}."
-            )
+            logger.info(f"Put batch {response.record_id!r} of size {batch_size} to Delivery Stream {stream_name!r}")
         except ClientError as e:
-            logger.error(traceback.format_exc())
+            logger.exception(e)
             raise e
 
 

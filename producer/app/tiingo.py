@@ -3,7 +3,7 @@ import json
 import time
 from abc import ABC, abstractmethod
 from datetime import datetime
-from typing import Any, Callable, Dict, List, TypedDict
+from typing import Any, Callable, Dict, List
 
 import boto3
 from botocore.exceptions import ClientError
@@ -154,7 +154,8 @@ def aws_retry(total_retries: int = 2, delay: int = 5) -> Callable:
     return decorator
 
 
-class FirehoseResponse(TypedDict):
+@dataclass
+class FirehoseResponse:
     record_id: str
     encrypted: bool
 
@@ -171,7 +172,6 @@ class CompressedBatch(bytes):
         firehose_client = boto3.client("firehose")
         record = {"Data": self.batch}
         response = firehose_client.put_record(DeliveryStreamName=stream, Record=record)
-        print(f"Returning response {response}")
         return FirehoseResponse(record_id=response["RecordId"], encrypted=response["Encrypted"])
 
 
