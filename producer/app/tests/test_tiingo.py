@@ -8,7 +8,7 @@ sys.path.append("..")
 from typing import Any, Dict
 from unittest.mock import MagicMock, patch
 
-from app.tiingo import (
+from src.tiingo import (
     CompressedBatch,
     FirehoseResponse,
     TiingoBatchSizeError,
@@ -207,7 +207,7 @@ class TestTradeBatch(unittest.TestCase):
 
 
 class TestCompressedTradeBatch(unittest.TestCase):
-    @patch("app.tiingo.boto3.client")
+    @patch("src.tiingo.boto3.client")
     def test_should_put_record_to_firehose(self, mock_client: MagicMock) -> None:
         """Ensures a record is correctly written to a Firehose Delivert Stream."""
 
