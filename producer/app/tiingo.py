@@ -138,7 +138,7 @@ def aws_retry(function: Callable) -> Callable:
     """
 
     def wrapper(*args, **kwargs) -> None:
-        total_retries = 3
+        total_retries = 2
         retries = 0
         while retries <= total_retries:
             try:
@@ -148,7 +148,7 @@ def aws_retry(function: Callable) -> Callable:
                 error_type = e.response["Error"]["Code"]
                 if error_type == "ServiceUnavailableError" and retries < total_retries:
                     retries += 1
-                    time.sleep(retries * 5)
+                    time.sleep(5)
                 else:
                     raise e
 

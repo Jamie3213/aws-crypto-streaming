@@ -9,6 +9,8 @@ from typing import Any, Dict
 from unittest.mock import MagicMock, patch
 
 from app.tiingo import (
+    aws_retry,
+    CompressedBatch,
     TiingoClient,
     TiingoBatchSizeError,
     TiingoMessageError,
@@ -16,9 +18,11 @@ from app.tiingo import (
     TradeBatch,
     TradeMessage,
 )
+from botocore.exceptions import ClientError
+from botocore.stub import Stubber
 from freezegun import freeze_time
-from moto import mock_firehose
 
+import botocore
 import data
 
 MOCK_NOW = "2022-03-04T12:34:48.648888"
@@ -204,7 +208,65 @@ class TestTradeBatch(unittest.TestCase):
 
 
 class TestCompressedTradeBatch(unittest.TestCase):
-    pass
+    @patch("app.tiingo.boto3.")
+    def test_should_put_record_to_firehose(self) -> None:
+        """Ensures a record is correctly written to a Firehose Delivert Stream."""
+
+        record = b"test"
+        compressed_batch = CompressedBatch(record)
+        firehose = botocore.session.get_session().create_client("firehose")
+        expected_response = {
+            "RecordId": "test",
+            "Encrypted": True
+        }
+        expected_params = {"DeliveryStreamName": "Test", "Record": {"Data": record}}
+        
+        with Stubber(firehose) as stubber:
+            stubber.add_response("put_record", expected_response, expected_params)
+            actual_response = compressed_batch.put_to_kinesis_stream("Test")
+            self.assertEqual(actual_response, expected_response)
+
+
+    def test_should_raise_client_error(self) -> None:
+        """Ensures that a ClientError is raised if consecutive retries fail."""
+
+        error_reponse = {
+            "Error": {
+                "Code": "ServiceUnavailableError",
+                "Message": "Something about the service being unavailable."
+            }
+        }
+
+        def raise_client_error() -> None:
+            raise ClientError(error_reponse, "PutRecord")
+
+        mock_put = MagicMock(side_effect=raise_client_error)
+        retry = aws_retry(mock_put)
+        
+        self.assertRaises(ClientError, retry)
+
+    def test_should_retry_on_error(self) -> None:
+        """Ensures that the correct number of retries occur before an exception is raised."""
+
+        error_reponse = {
+            "Error": {
+                "Code": "ServiceUnavailableError",
+                "Message": "Something about the service being unavailable."
+            }
+        }
+
+        def raise_client_error() -> None:
+            raise ClientError(error_reponse, "PutRecord")
+
+        mock_put = MagicMock(side_effect=raise_client_error)
+        retry = aws_retry(mock_put)
+        
+        try:
+            retry()
+        except ClientError:
+            pass
+        
+        self.assertEqual(mock_put.call_count, 3)
 
 
 if __name__ == "__main__":
