@@ -3,7 +3,7 @@ import json
 import time
 from abc import ABC, abstractmethod
 from datetime import datetime
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, TypedDict
 
 import boto3
 from botocore.exceptions import ClientError
@@ -18,7 +18,7 @@ class TiingoClientError(Exception):
         self.code = code
         self.message = message
         super().__init__(
-            f"Failed to get next API message with error {self.code}: '{self.message}'."
+            f"Failed to get next API message with error {self.code}: {self.message!r}."
         )
 
 
@@ -27,7 +27,7 @@ class TiingoMessageError(Exception):
         self.code = code
         self.message = message
         super().__init__(
-            f"Failed to get message with error {self.code}: '{self.message}'."
+            f"Failed to get message with error {self.code}: {self.message!r}."
         )
 
 
@@ -36,7 +36,7 @@ class TiingoSubscriptionError(Exception):
         self.code = code
         self.message = message
         super().__init__(
-            f"API subscription failed with error {self.code}: '{self.message}'."
+            f"API subscription failed with error {self.code}: {self.message!r}."
         )
 
 
@@ -130,29 +130,33 @@ class MessageParserFactory:
         return factory[message_type]
 
 
-def aws_retry(function: Callable) -> Callable:
+def aws_retry(total_retries: int = 2, delay: int = 5) -> Callable:
     """
     Retries the function if a 'ServiceUnavailableError' is raised, increasing the time
     between retries as a factor of the number of retries. After the total retries value
     is exceeded, an error is raised.
     """
 
-    def wrapper(*args, **kwargs) -> None:
-        total_retries = 2
-        retries = 0
-        while retries <= total_retries:
-            try:
-                function(*args, **kwargs)
-                break
-            except ClientError as e:
-                error_type = e.response["Error"]["Code"]
-                if error_type == "ServiceUnavailableError" and retries < total_retries:
-                    retries += 1
-                    time.sleep(5)
-                else:
-                    raise e
+    def decorator(function: Callable) -> Callable:
+        def wrapper(*args, **kwargs) -> None:
+            retries = 0
+            while retries <= total_retries:
+                try:
+                    return function(*args, **kwargs)
+                except ClientError as e:
+                    error_type = e.response["Error"]["Code"]
+                    if error_type == "ServiceUnavailableError" and retries < total_retries:
+                        retries += 1
+                        time.sleep(retries * delay)
+                    else:
+                        raise e
+        return wrapper
+    return decorator
 
-    return wrapper
+
+class FirehoseResponse(TypedDict):
+    record_id: str
+    encrypted: bool
 
 
 class CompressedBatch(bytes):
@@ -161,12 +165,14 @@ class CompressedBatch(bytes):
     def __init__(self, batch: bytes) -> None:
         self.batch = batch
 
-    @aws_retry
-    def put_to_kinesis_stream(self, stream: str) -> None:
+    @aws_retry()
+    def put_to_kinesis_stream(self, stream: str) -> FirehoseResponse:
         """Writes a record to a Kinesis Data Firehose Delivery Stream."""
         firehose_client = boto3.client("firehose")
-        put_record = {"Data": self.batch}
-        firehose_client.put_record(DeliveryStreamName=stream, Record=put_record)
+        record = {"Data": self.batch}
+        response = firehose_client.put_record(DeliveryStreamName=stream, Record=record)
+        print(f"Returning response {response}")
+        return FirehoseResponse(record_id=response["RecordId"], encrypted=response["Encrypted"])
 
 
 class TradeBatch(list):
@@ -196,10 +202,6 @@ class TiingoClient(WebSocket):
     """
     Extends WebSocket methods to add Tiingo specific functionality for use
     in connecting to Tiingo WSS APIs.
-
-    Attributes:
-      url (str): The API URL.
-      token (str): The API auth token.
     """
 
     def __init__(self, url: str, token: str):

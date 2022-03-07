@@ -9,20 +9,19 @@ from typing import Any, Dict
 from unittest.mock import MagicMock, patch
 
 from app.tiingo import (
-    aws_retry,
     CompressedBatch,
-    TiingoClient,
+    FirehoseResponse,
     TiingoBatchSizeError,
+    TiingoClient,
     TiingoMessageError,
     TiingoSubscriptionError,
     TradeBatch,
     TradeMessage,
+    aws_retry,
 )
 from botocore.exceptions import ClientError
-from botocore.stub import Stubber
 from freezegun import freeze_time
 
-import botocore
 import data
 
 MOCK_NOW = "2022-03-04T12:34:48.648888"
@@ -208,24 +207,18 @@ class TestTradeBatch(unittest.TestCase):
 
 
 class TestCompressedTradeBatch(unittest.TestCase):
-    @patch("app.tiingo.boto3.")
-    def test_should_put_record_to_firehose(self) -> None:
+    @patch("app.tiingo.boto3.client")
+    def test_should_put_record_to_firehose(self, mock_client: MagicMock) -> None:
         """Ensures a record is correctly written to a Firehose Delivert Stream."""
+
+        mock_client.return_value.put_record.return_value = {"RecordId": "test", "Encrypted": True}
 
         record = b"test"
         compressed_batch = CompressedBatch(record)
-        firehose = botocore.session.get_session().create_client("firehose")
-        expected_response = {
-            "RecordId": "test",
-            "Encrypted": True
-        }
-        expected_params = {"DeliveryStreamName": "Test", "Record": {"Data": record}}
-        
-        with Stubber(firehose) as stubber:
-            stubber.add_response("put_record", expected_response, expected_params)
-            actual_response = compressed_batch.put_to_kinesis_stream("Test")
-            self.assertEqual(actual_response, expected_response)
+        actual_response = compressed_batch.put_to_kinesis_stream("test")
+        expected_response = FirehoseResponse(record_id="test", encrypted=True)
 
+        self.assertEqual(actual_response, expected_response)
 
     def test_should_raise_client_error(self) -> None:
         """Ensures that a ClientError is raised if consecutive retries fail."""
@@ -233,7 +226,7 @@ class TestCompressedTradeBatch(unittest.TestCase):
         error_reponse = {
             "Error": {
                 "Code": "ServiceUnavailableError",
-                "Message": "Something about the service being unavailable."
+                "Message": "Something about the service being unavailable.",
             }
         }
 
@@ -241,8 +234,8 @@ class TestCompressedTradeBatch(unittest.TestCase):
             raise ClientError(error_reponse, "PutRecord")
 
         mock_put = MagicMock(side_effect=raise_client_error)
-        retry = aws_retry(mock_put)
-        
+        retry = aws_retry(total_retries=2, delay=0)(mock_put)
+
         self.assertRaises(ClientError, retry)
 
     def test_should_retry_on_error(self) -> None:
@@ -251,7 +244,7 @@ class TestCompressedTradeBatch(unittest.TestCase):
         error_reponse = {
             "Error": {
                 "Code": "ServiceUnavailableError",
-                "Message": "Something about the service being unavailable."
+                "Message": "Something about the service being unavailable.",
             }
         }
 
@@ -259,13 +252,13 @@ class TestCompressedTradeBatch(unittest.TestCase):
             raise ClientError(error_reponse, "PutRecord")
 
         mock_put = MagicMock(side_effect=raise_client_error)
-        retry = aws_retry(mock_put)
-        
+        retry = aws_retry(total_retries=2, delay=0)(mock_put)
+
         try:
             retry()
         except ClientError:
             pass
-        
+
         self.assertEqual(mock_put.call_count, 3)
 
 

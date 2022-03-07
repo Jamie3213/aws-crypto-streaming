@@ -54,9 +54,9 @@ def main() -> None:
         compressed_batch = batch.compress()
 
         try:
-            compressed_batch.put_to_kinesis_stream(stream_name)
+            response = compressed_batch.put_to_kinesis_stream(stream_name)
             logger.info(
-                f"Successfully put batch of size {batch_size} to stream '{stream_name}'."
+                f"Successfully put batch {response.record_id!r} of size {batch_size} to stream {stream_name!r}."
             )
         except ClientError as e:
             logger.error(traceback.format_exc())
