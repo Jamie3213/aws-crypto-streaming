@@ -1,17 +1,16 @@
 import os
 
 import yaml
-from aws_cdk import App, Environment, Stack
+from aws_cdk import App, Duration, Environment, RemovalPolicy, Size, Stack
 from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_ecr as ecr
 from aws_cdk import aws_ecs as ecs
 from aws_cdk import aws_iam as iam
-from aws_cdk import aws_kinesisfirehose_alpha as firehose
-from aws_cdk import aws_kinesisfirehose_destinations as destination
+from aws_cdk import aws_kinesisfirehose as firehose
 from aws_cdk import aws_logs as logs
 from aws_cdk import aws_s3 as s3
-from aws_cdk.core import Duration, RemovalPolicy, Size
 from constructs import Construct
+
 
 with open("config.yml", "r") as file:
     config = yaml.safe_load(file)
@@ -27,15 +26,15 @@ class CryptoStreamingStack(Stack):
         super().__init__(scope, id, **kwargs)
 
         # External AWS resources
-        default_vpc = ec2.Vpc.from_lookup(self, id="Vpc", is_default=True)
+        default_vpc = ec2.Vpc.from_lookup(self, "Vpc", is_default=True)
         s3_data_lake = s3.Bucket.from_bucket_name(
-            self, id="S3DataLake", bucket_name=s3_data_lake_name
+            self, "S3DataLake", bucket_name=s3_data_lake_name
         )
 
         # Stack resources
         log_group = logs.LogGroup(
             self,
-            id="LogGroup",
+            "LogGroup",
             log_group_name=f"/aws/jamie/{project_abrv}",
             retention=logs.RetentionDays.ONE_MONTH,
             removal_policy=RemovalPolicy.DESTROY,
@@ -43,7 +42,7 @@ class CryptoStreamingStack(Stack):
 
         fargate_cluster = ecs.Cluster(
             self,
-            id="EcsFargateCluster",
+            "EcsFargateCluster",
             cluster_name=f"ecs-jamie-{project_abrv}-fargate",
             enable_fargate_capacity_providers=True,
             container_insights=True,
@@ -58,7 +57,7 @@ class CryptoStreamingStack(Stack):
 
         image_repo = ecr.Repository(
             self,
-            id=f"FirehoseProducerEcrRepo",
+            "FirehoseProducerEcrRepo",
             repository_name=f"ecr-jamie-{project_abrv}-firehose-producer",
             removal_policy=RemovalPolicy.DESTROY,
             lifecycle_rules=[
@@ -72,15 +71,14 @@ class CryptoStreamingStack(Stack):
 
         firehose_iam_role = iam.Role(
             self,
-            id="FirehoseProducerIamRole",
-            role_name=f"iam-{kwargs['env'].region}-firehose-producer",
-            path=f"/aws/jamie/{project_abrv}",
+            "FirehoseProducerIamRole",
+            role_name=f"iam-{kwargs['env'].region}-{project_abrv}-firehose-producer",
             assumed_by=iam.ServicePrincipal("firehose.amazonaws.com"),
         )
 
         firehose_iam_policy = iam.Policy(
             self,
-            id="FirehoseProducerIamPolicy",
+            "FirehoseProducerIamPolicy",
             policy_name=f"policy-jamie-{project_abrv}-firehose-producer",
             statements=[
                 iam.PolicyStatement(
@@ -106,18 +104,25 @@ class CryptoStreamingStack(Stack):
             roles=[firehose_iam_role],
         )
 
-        firehose_s3_destination = destination.S3Bucket(
-            bucket=s3_data_lake,
-            buffering_interval=Duration.seconds(60),
-            buffering_size=Size.mebibytes(5),
-        )
-
-        firehose_delivery_stream = firehose.DeliveryStream(
+        firehose_delivery_stream = firehose.CfnDeliveryStream(
             self,
-            id="FirehoseDeliveryStream",
+            "FirehoseDeliveryStream",
             delivery_stream_name=f"firehose-jamie-{project_abrv}-stream",
-            destinations=[firehose_s3_destination],
-            role=firehose_iam_role,
+            delivery_stream_type="DirectPut",
+            extended_s3_destination_configuration=firehose.CfnDeliveryStream.ExtendedS3DestinationConfigurationProperty(
+                bucket_arn=s3_data_lake.bucket_arn,
+                role_arn=firehose_iam_role.role_arn,
+                compression_format="UNCOMPRESSED",
+                buffering_hints=firehose.CfnDeliveryStream.BufferingHintsProperty(
+                    interval_in_seconds=60, size_in_m_bs=5
+                ),
+                prefix=f"bronze/{project_abrv}/",
+                cloud_watch_logging_options=firehose.CfnDeliveryStream.CloudWatchLoggingOptionsProperty(
+                    enabled=True,
+                    log_group_name=log_group.log_group_name,
+                    log_stream_name="firehose",
+                ),
+            ),
         )
 
 
