@@ -1,7 +1,9 @@
+import os
+
 import yaml
 from botocore.exceptions import ClientError
 
-import tiingo.helpers as helpers
+import tiingo.logger as create_logger
 from tiingo.client import TiingoClient
 from tiingo.exceptions import TiingoClientError, TiingoSubscriptionError
 
@@ -11,27 +13,19 @@ def load_config_vars() -> tuple:
         config = yaml.safe_load(stream)
 
     url = config["Api"]["Url"]
-    secret_name = config["Api"]["SecretName"]
     stream_name = config["Firehose"]["StreamName"]
     batch_size = config["Firehose"]["BatchSize"]
 
-    return (url, secret_name, stream_name, batch_size)
+    return (url, stream_name, batch_size)
 
 
 def main() -> None:
-    logger = helpers.create_logger(__name__)
+    logger = create_logger(__name__)
     logger.info("Reading YAML config and extracting variables...")
-    url, secret_name, stream_name, batch_size = load_config_vars()
-
-    logger.info("Getting API token from Secrets Manager...")
-
-    try:
-        token = helpers.get_secrets_manager_secret(secret_name)
-    except ClientError as e:
-        logger.exception(e)
-        raise e
+    url, stream_name, batch_size = load_config_vars()
 
     logger.info("Connecting and subscribing to the Tiingo websocket crypto API...")
+    token = os.environ["TIINGO_API_TOKEN"]
 
     try:
         client = TiingoClient(url, token)
