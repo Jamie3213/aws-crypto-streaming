@@ -31,4 +31,4 @@ cdk synth --app "python3 ./src/app.py" --output ./src/cdk.out
 cdk deploy --app "python3 ./src/app.py" --require-approval never --all
 
 echo Restarting Fargate Service with latest container image...
-aws ecs update-service --cluster $ECS_CLUSTER_NAME --service service-$ORG-$PROJECT-firehose-producer --force-new-deployment
+aws ecs update-service --cluster $ECS_CLUSTER_NAME --service service-$ORG-$PROJECT-firehose-producer --force-new-deployment > /dev/null
