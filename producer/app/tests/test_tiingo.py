@@ -8,21 +8,19 @@ sys.path.append("..")
 from typing import Any, Dict
 from unittest.mock import MagicMock, patch
 
-from src.tiingo import (
-    CompressedBatch,
-    FirehoseResponse,
-    TiingoBatchSizeError,
-    TiingoClient,
-    TiingoMessageError,
-    TiingoSubscriptionError,
-    TradeBatch,
-    TradeMessage,
-    aws_retry,
-)
 from botocore.exceptions import ClientError
 from freezegun import freeze_time
+from src.tiingo.batches import CompressedBatch, FirehoseResponse, TradeBatch, aws_retry
+from src.tiingo.client import TiingoClient
+from src.tiingo.data_structs import TradeMessage
+from src.tiingo.exceptions import (
+    TiingoBatchSizeError,
+    TiingoMessageError,
+    TiingoSubscriptionError,
+)
 
 import data
+
 
 MOCK_NOW = "2022-03-04T12:34:48.648888"
 
@@ -207,11 +205,14 @@ class TestTradeBatch(unittest.TestCase):
 
 
 class TestCompressedTradeBatch(unittest.TestCase):
-    @patch("src.tiingo.boto3.client")
+    @patch("src.tiingo.batches.boto3.client")
     def test_should_put_record_to_firehose(self, mock_client: MagicMock) -> None:
         """Ensures a record is correctly written to a Firehose Delivert Stream."""
 
-        mock_client.return_value.put_record.return_value = {"RecordId": "test", "Encrypted": True}
+        mock_client.return_value.put_record.return_value = {
+            "RecordId": "test",
+            "Encrypted": True,
+        }
 
         record = b"test"
         compressed_batch = CompressedBatch(record)

@@ -1,0 +1,14 @@
+*.swp
+package-lock.json
+__pycache__
+.pytest_cache
+.venv
+*.egg-info
+
+### CDK-specific ignores ###
+*.swp
+cdk.context.json
+package-lock.json
+yarn.lock
+.cdk.staging
+cdk.out

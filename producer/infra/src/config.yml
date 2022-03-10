@@ -1,0 +1,8 @@
+Variables:
+  ProjectAbrv: crypto
+Resources:
+  S3DataLake: s3-jamie-general-data-lake
+  LogGroup: /aws/jamie/crypto
+  EcsCluster: ecs-jamie-general-fargate
+  EcrRepo: ecr-jamie-crypto-firehose-producer
+  SecretsManagerSecret: TiingoApiToken

@@ -1,9 +1,9 @@
-from helpers import get_secrets_manager_secret
-from logger import create_logger
-
 import yaml
 from botocore.exceptions import ClientError
-from tiingo import TiingoClient, TiingoClientError, TiingoSubscriptionError
+
+import tiingo.helpers as helpers
+from tiingo.client import TiingoClient
+from tiingo.exceptions import TiingoClientError, TiingoSubscriptionError
 
 
 def load_config_vars() -> tuple:
@@ -19,14 +19,14 @@ def load_config_vars() -> tuple:
 
 
 def main() -> None:
-    logger = create_logger(__name__)
+    logger = helpers.create_logger(__name__)
     logger.info("Reading YAML config and extracting variables...")
     url, secret_name, stream_name, batch_size = load_config_vars()
 
     logger.info("Getting API token from Secrets Manager...")
 
     try:
-        token = get_secrets_manager_secret(secret_name)
+        token = helpers.get_secrets_manager_secret(secret_name)
     except ClientError as e:
         logger.exception(e)
         raise e
