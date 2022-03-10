@@ -3,9 +3,9 @@ import os
 import yaml
 from botocore.exceptions import ClientError
 
-import tiingo.logger as create_logger
 from tiingo.client import TiingoClient
 from tiingo.exceptions import TiingoClientError, TiingoSubscriptionError
+from tiingo.logger import create_logger
 
 
 def load_config_vars() -> tuple:
