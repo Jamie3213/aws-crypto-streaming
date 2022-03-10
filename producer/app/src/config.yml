@@ -1,6 +1,6 @@
 Api:
   Url: wss://api.tiingo.com/crypto
 Firehose:
-  StreamName: firehose-jamie-test-stream
+  StreamName: firehose-jamie-crypto-stream
   BatchSize: 1000
   TotalRetries: 3
