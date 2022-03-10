@@ -35,8 +35,6 @@ class FargateStack(Stack):
         security_group = ec2.SecurityGroup(self, "SecurityGroup", vpc=default_vpc, allow_all_outbound=True)
         security_group.connections.allow_internally(port_range=ec2.Port.all_traffic())
 
-        print(secrets_manager_secret.secret_arn)
-
         ecs_cluster = ecs.Cluster.from_cluster_attributes(
             self,
             "EcsCluster",
@@ -99,7 +97,7 @@ class FargateStack(Stack):
                     sid="FargateGetSecretsManagerSecret",
                     effect=iam.Effect.ALLOW,
                     actions=["secretsmanager:GetSecretValue"],
-                    resources=[secrets_manager_secret.secret_full_arn],
+                    resources=[f"{secrets_manager_secret.secret_arn}-*"],
                 ),
                 iam.PolicyStatement(
                     sid="FargateWriteToFirehose",
@@ -132,7 +130,7 @@ class FargateStack(Stack):
                 ecr_repo.repository_uri_for_tag("latest")
             ),
             container_name="container-firehose-producer",
-            secrets={"TIINGO_API_TOKEN": secrets_manager_secret},
+            secrets={"TIINGO_API_TOKEN": ecs.Secret.from_secrets_manager(secrets_manager_secret)},
             logging=ecs.LogDriver.aws_logs(
                 stream_prefix="fargate", log_group=log_group
             ),
