@@ -1,30 +1,22 @@
 import os
 
-import yaml
-from botocore.exceptions import ClientError
 from tiingo.client import TiingoClient
-from tiingo.exceptions import TiingoClientError, TiingoSubscriptionError
+from tiingo.exceptions import (
+    TiingoClientError,
+    TiingoSubscriptionError,
+    TiingoWriteDestinationError,
+)
 from tiingo.logger import create_logger
 
-
-def load_config_vars() -> tuple:
-    with open("config.yml", "r") as stream:
-        config = yaml.safe_load(stream)
-
-    url = config["Api"]["Url"]
-    stream_name = config["Firehose"]["StreamName"]
-    batch_size = config["Firehose"]["BatchSize"]
-
-    return (url, stream_name, batch_size)
+url = os.environ["TIINGO_API_URL"]
+stream_name = os.environ["FIREHOSE_DELIVERY_STREAM"]
+batch_size = os.environ["FIREHOSE_BATCH_SIZE"]
+token = os.environ["TIINGO_API_TOKEN"]
 
 
 def main() -> None:
     logger = create_logger(__name__)
-    logger.info("Reading YAML config and extracting variables...")
-    url, stream_name, batch_size = load_config_vars()
-
     logger.info("Connecting and subscribing to the Tiingo websocket crypto API...")
-    token = os.environ["TIINGO_API_TOKEN"]
 
     try:
         client = TiingoClient(url, token)
@@ -48,7 +40,7 @@ def main() -> None:
             logger.info(
                 f"Put batch {response.record_id!r} of size {batch_size} to Delivery Stream {stream_name!r}"
             )
-        except ClientError as e:
+        except TiingoWriteDestinationError as e:
             logger.exception(e)
             raise e
 

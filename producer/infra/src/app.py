@@ -21,6 +21,9 @@ ecs_cluster_name = resources["EcsCluster"]
 ecr_repo_name = resources["EcrRepo"]
 secret_name = resources["SecretsManagerSecret"]
 
+tiingo_api_url = config["Producer"]["TiingoApiUrl"]
+firehose_batch_size = config["Producer"]["FirehoseBatchSize"]
+
 aws_account = os.environ["CDK_DEFAULT_ACCOUNT"]
 aws_region = os.environ["CDK_DEFAULT_REGION"]
 
@@ -52,6 +55,8 @@ if __name__ == "__main__":
         ecr_repo_name=ecr_repo_name,
         secret_name=secret_name,
         delivery_stream=firehose_stack.firehose_delivery_stream,
+        tiingo_api_url=tiingo_api_url,
+        firehose_batch_size=firehose_batch_size,
     )
 
     Tags.of(app).add("Project", project)

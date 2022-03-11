@@ -21,6 +21,8 @@ class FargateStack(Stack):
         ecr_repo_name: str,
         secret_name: str,
         delivery_stream: CfnDeliveryStream,
+        tiingo_api_url: str,
+        firehose_batch_size: int,
         **kwargs,
     ) -> None:
         super().__init__(scope, id, **kwargs)
@@ -134,6 +136,11 @@ class FargateStack(Stack):
                 ecr_repo.repository_uri_for_tag("latest")
             ),
             container_name="container-firehose-producer",
+            environment={
+                "TIINGO_API_URL": tiingo_api_url,
+                "FIREHOSE_BATCH_SIZE": firehose_batch_size,
+                "FIREHOSE_DELIVERY_STREAM": delivery_stream.delivery_stream_name,
+            },
             secrets={
                 "TIINGO_API_TOKEN": ecs.Secret.from_secrets_manager(
                     secrets_manager_secret

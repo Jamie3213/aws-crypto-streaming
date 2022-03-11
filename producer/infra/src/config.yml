@@ -7,3 +7,6 @@ Resources:
   EcsCluster: ecs-jamie-general-fargate
   EcrRepo: ecr-jamie-crypto-firehose-producer
   SecretsManagerSecret: TiingoApiToken
+Producer:
+  TiingoApiUrl: wss://api.tiingo.com/crypto
+  FirehoseBatchSize: 1000

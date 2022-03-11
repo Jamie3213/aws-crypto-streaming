@@ -1,7 +1,7 @@
 from aws_cdk import Stack
 from aws_cdk import aws_iam as iam
 from aws_cdk import aws_kinesisfirehose as firehose
-from aws_cdk.aws_logs import LogGroup
+from aws_cdk import aws_logs as logs
 from aws_cdk.aws_s3 import Bucket
 from constructs import Construct
 
@@ -21,9 +21,13 @@ class FirehoseStack(Stack):
 
         env = kwargs["env"]
 
-        log_group = LogGroup.from_log_group_name(self, "LogGroup", log_group_name)
+        log_group = logs.LogGroup.from_log_group_name(self, "LogGroup", log_group_name)
         s3_destination = Bucket.from_bucket_name(
             self, "S3DataLake", s3_destination_name
+        )
+
+        log_stream = logs.LogStream(
+            self, "LogStream", log_group=log_group, log_stream_name="firehose"
         )
 
         firehose_iam_role = iam.Role(

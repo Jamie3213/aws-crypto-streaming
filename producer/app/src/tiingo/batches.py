@@ -9,6 +9,7 @@ from pydantic.dataclasses import dataclass
 from pydantic.json import pydantic_encoder
 
 from .data_structs import TradeMessage
+from .exceptions import TiingoWriteDestinationError
 
 
 @dataclass
@@ -31,15 +32,16 @@ def aws_retry(total_retries: int = 2, delay: int = 5) -> Callable:
                 try:
                     return function(*args, **kwargs)
                 except ClientError as e:
-                    error_type = e.response["Error"]["Code"]
+                    error_code = e.response["Error"]["Code"]
+                    error_message = e.response["Error"]["Message"]
                     if (
-                        error_type == "ServiceUnavailableError"
+                        error_code == "ServiceUnavailableError"
                         and retries < total_retries
                     ):
                         retries += 1
                         time.sleep(retries * delay)
                     else:
-                        raise e
+                        raise TiingoWriteDestinationError(error_code, error_message)
 
         return wrapper
 
