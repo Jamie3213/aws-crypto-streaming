@@ -46,7 +46,7 @@ class FirehoseStack(Stack):
                     sid="FirehoseCreateAndWriteLogStreams",
                     effect=iam.Effect.ALLOW,
                     actions=["logs:CreateLogStream", "logs:PutLogEvents"],
-                    resources=[f"{log_group.log_group_arn}:*"],
+                    resources=[log_group.log_group_arn],
                 ),
                 iam.PolicyStatement(
                     sid="FirehoseS3Access",
@@ -61,7 +61,7 @@ class FirehoseStack(Stack):
                     ],
                     resources=[
                         s3_destination.bucket_arn,
-                        f"{s3_destination.bucket_arn}:/*",
+                        f"{s3_destination.bucket_arn}/*",
                     ],
                 ),
             ],
