@@ -22,7 +22,7 @@ class FargateStack(Stack):
         secret_name: str,
         delivery_stream: CfnDeliveryStream,
         tiingo_api_url: str,
-        firehose_batch_size: int,
+        firehose_batch_size: str,
         **kwargs,
     ) -> None:
         super().__init__(scope, id, **kwargs)

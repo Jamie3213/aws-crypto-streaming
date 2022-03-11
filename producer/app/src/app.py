@@ -10,7 +10,7 @@ from tiingo.logger import create_logger
 
 url = os.environ["TIINGO_API_URL"]
 stream_name = os.environ["FIREHOSE_DELIVERY_STREAM"]
-batch_size = os.environ["FIREHOSE_BATCH_SIZE"]
+batch_size = int(os.environ["FIREHOSE_BATCH_SIZE"])
 token = os.environ["TIINGO_API_TOKEN"]
 
 
