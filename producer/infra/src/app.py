@@ -2,10 +2,8 @@ import os
 
 import yaml
 from aws_cdk import App, Environment, Tags
-
-from stacks.firehose import FirehoseStack
 from stacks.fargate import FargateStack
-
+from stacks.firehose import FirehoseStack
 
 current_directory = os.path.dirname(__file__)
 config_file = os.path.join(current_directory, "config.yml")

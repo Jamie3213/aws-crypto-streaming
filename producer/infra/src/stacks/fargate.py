@@ -1,7 +1,7 @@
 from aws_cdk import Stack
-from aws_cdk import aws_iam as iam
 from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_ecs as ecs
+from aws_cdk import aws_iam as iam
 from aws_cdk.aws_ecr import Repository
 from aws_cdk.aws_kinesisfirehose import CfnDeliveryStream
 from aws_cdk.aws_logs import LogGroup
@@ -21,7 +21,7 @@ class FargateStack(Stack):
         ecr_repo_name: str,
         secret_name: str,
         delivery_stream: CfnDeliveryStream,
-        **kwargs
+        **kwargs,
     ) -> None:
         super().__init__(scope, id, **kwargs)
 
@@ -30,9 +30,13 @@ class FargateStack(Stack):
         default_vpc = ec2.Vpc.from_lookup(self, "Vpc", is_default=True)
         log_group = LogGroup.from_log_group_name(self, "LogGroup", log_group_name)
         ecr_repo = Repository.from_repository_name(self, "EcrRepo", ecr_repo_name)
-        secrets_manager_secret = Secret.from_secret_name_v2(self, "SecretsManagerSecret", secret_name)
+        secrets_manager_secret = Secret.from_secret_name_v2(
+            self, "SecretsManagerSecret", secret_name
+        )
 
-        security_group = ec2.SecurityGroup(self, "SecurityGroup", vpc=default_vpc, allow_all_outbound=True)
+        security_group = ec2.SecurityGroup(
+            self, "SecurityGroup", vpc=default_vpc, allow_all_outbound=True
+        )
         security_group.connections.allow_internally(port_range=ec2.Port.all_traffic())
 
         ecs_cluster = ecs.Cluster.from_cluster_attributes(
@@ -130,7 +134,11 @@ class FargateStack(Stack):
                 ecr_repo.repository_uri_for_tag("latest")
             ),
             container_name="container-firehose-producer",
-            secrets={"TIINGO_API_TOKEN": ecs.Secret.from_secrets_manager(secrets_manager_secret)},
+            secrets={
+                "TIINGO_API_TOKEN": ecs.Secret.from_secrets_manager(
+                    secrets_manager_secret
+                )
+            },
             logging=ecs.LogDriver.aws_logs(
                 stream_prefix="fargate", log_group=log_group
             ),

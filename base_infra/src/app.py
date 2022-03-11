@@ -1,14 +1,10 @@
 import os
-from datetime import datetime
 
 import yaml
 from aws_cdk import App, Duration, Environment, RemovalPolicy, Stack, Tags
-from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_ecr as ecr
-from aws_cdk import aws_ecs as ecs
 from aws_cdk import aws_logs as logs
 from constructs import Construct
-
 
 with open("config.yml", "r") as file:
     config = yaml.safe_load(file)
@@ -55,6 +51,5 @@ if __name__ == "__main__":
 
     Tags.of(app).add("Project", project_abrv)
     Tags.of(app).add("CreatedBy", "jamie")
-    Tags.of(app).add("LastUpdated", datetime.strftime(datetime.utcnow(), "%Y-%m-%dT%H:%M:%S"))
 
     app.synth()

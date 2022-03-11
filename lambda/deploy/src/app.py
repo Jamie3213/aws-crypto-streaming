@@ -11,7 +11,6 @@ from aws_cdk import aws_logs as logs
 from aws_cdk import aws_s3 as s3
 from constructs import Construct
 
-
 with open("config.yml", "r") as file:
     config = yaml.safe_load(file)
 

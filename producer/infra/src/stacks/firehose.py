@@ -22,7 +22,9 @@ class FirehoseStack(Stack):
         env = kwargs["env"]
 
         log_group = LogGroup.from_log_group_name(self, "LogGroup", log_group_name)
-        s3_destination = Bucket.from_bucket_name(self, "S3DataLake", s3_destination_name)
+        s3_destination = Bucket.from_bucket_name(
+            self, "S3DataLake", s3_destination_name
+        )
 
         firehose_iam_role = iam.Role(
             self,

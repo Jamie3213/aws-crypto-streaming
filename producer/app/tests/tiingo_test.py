@@ -8,6 +8,7 @@ sys.path.append("..")
 from typing import Any, Dict
 from unittest.mock import MagicMock, patch
 
+import data
 from botocore.exceptions import ClientError
 from freezegun import freeze_time
 from src.tiingo.batches import CompressedBatch, FirehoseResponse, TradeBatch, aws_retry
@@ -18,9 +19,6 @@ from src.tiingo.exceptions import (
     TiingoMessageError,
     TiingoSubscriptionError,
 )
-
-import data
-
 
 MOCK_NOW = "2022-03-04T12:34:48.648888"
 

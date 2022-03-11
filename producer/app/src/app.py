@@ -2,7 +2,6 @@ import os
 
 import yaml
 from botocore.exceptions import ClientError
-
 from tiingo.client import TiingoClient
 from tiingo.exceptions import TiingoClientError, TiingoSubscriptionError
 from tiingo.logger import create_logger
@@ -46,7 +45,9 @@ def main() -> None:
 
         try:
             response = compressed_batch.put_to_kinesis_stream(stream_name)
-            logger.info(f"Put batch {response.record_id!r} of size {batch_size} to Delivery Stream {stream_name!r}")
+            logger.info(
+                f"Put batch {response.record_id!r} of size {batch_size} to Delivery Stream {stream_name!r}"
+            )
         except ClientError as e:
             logger.exception(e)
             raise e
