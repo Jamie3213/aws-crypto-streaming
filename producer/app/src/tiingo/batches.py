@@ -82,7 +82,7 @@ class TradeBatch(list):
         json_strings = [
             json.dumps(trade, default=pydantic_encoder) for trade in self.batch
         ]
-        new_line_delimited_trades = "\n".join(json_strings)
+        new_line_delimited_trades = "\n".join(json_strings) + "\n"
         encoded_trades = new_line_delimited_trades.encode("utf-8")
         compressed_record = gzip.compress(encoded_trades)
         return CompressedBatch(compressed_record)

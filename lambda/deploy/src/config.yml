@@ -1,4 +1,0 @@
-Variables:
-  ProjectAbrv: test
-Resources:
-  S3DataLake: s3-jamie-general-data-lake
