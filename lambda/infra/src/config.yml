@@ -1,3 +1,5 @@
 Variables:
   Org: jamie
   Project: crypto
+Resources:
+  DynamoDbTableName: TiingoTrade

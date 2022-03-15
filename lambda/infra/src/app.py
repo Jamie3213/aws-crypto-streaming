@@ -2,6 +2,7 @@ import os
 
 import yaml
 from aws_cdk import App, Duration, Environment, RemovalPolicy, Size, Stack
+from aws_cdk import aws_dynamodb as dynamodb
 from aws_cdk import aws_lambda as _lambda
 from constructs import Construct
 
@@ -11,6 +12,8 @@ with open("config.yml", "r") as file:
 variables = config["Variables"]
 project = variables["Project"]
 org = variables["Org"]
+
+table_name = config["Resources"]["DynamoDbTableName"]
 
 
 class TradeRecordProcessingStack(Stack):
@@ -31,7 +34,22 @@ class TradeRecordProcessingStack(Stack):
             runtime=_lambda.Runtime.PYTHON_3_9,
             architecture=_lambda.Architecture.ARM_64,
             memory_size=128,
+            environment={"DYNAMODB_TABLE_NAME": table_name},
             timeout=Duration.seconds(30),
+            retry_attempts=1,
+        )
+
+        dynamodb_table = dynamodb.Table(
+            self,
+            "DynamoDbTable",
+            table_name=table_name,
+            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+            partition_key=dynamodb.Attribute(
+                name="ticker", type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name="executed_at", type=dynamodb.AttributeType.NUMBER
+            ),
         )
 
 
