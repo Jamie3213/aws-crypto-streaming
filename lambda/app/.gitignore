@@ -156,5 +156,6 @@ cython_debug/
 # AWS Lambda
 src/*
 !src/app.py
-!src/utils
+!src/trade_processor
+!src/event.json
 lambda.zip
