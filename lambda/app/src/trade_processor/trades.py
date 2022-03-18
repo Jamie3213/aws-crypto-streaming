@@ -4,26 +4,26 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
 from io import BytesIO
-from typing import Dict, List, Union
+from typing import Any, Dict, List, Union
 
 import boto3
 
-from .dynamodb import AttributeMapping, AttributeType, Item, PutRequest
+from .dynamodb import Attributes, AttributeType, PutRequest, exhaust_unprocessed_items
 
 
 def _utc_now_unix() -> str:
-    return datetime.utcnow().timestamp()
+    return str(datetime.utcnow().timestamp())
 
 
 @dataclass
 class Trade:
     ticker: str
-    executed_at: float
+    executed_at: str
     exchange: str
-    size: float
-    price: float
-    producer_processed_at: float
-    lambda_processed_at: float = field(default_factory=_utc_now_unix)
+    size: str
+    price: str
+    producer_processed_at: str
+    lambda_processed_at: str = field(default_factory=_utc_now_unix)
 
 
 class TradeList:
@@ -33,38 +33,44 @@ class TradeList:
     def __len__(self) -> int:
         return len(self.trades)
 
-    def create_batches(self, size: int = 25) -> List[List["TradeList"]]:
+    def batch(self, size: int = 25) -> List["TradeList"]:
         batches = []
         for i in range(0, len(self.trades), size):
-            batches.append(self.trades[i : i + size])
+            batch = TradeList(self.trades[i : i + size])
+            batches.append(batch)
         return batches
 
-    def _create_dynamodb_attributes(self, trade: Trade) -> Dict[str, AttributeMapping]:
+    def _create_dynamodb_attributes(self, trade: Trade) -> Attributes:
         return {
-            "Ticker": AttributeMapping(AttributeType.STRING.value, trade.ticker),
-            "ExecutedAt": AttributeMapping(
-                AttributeType.NUMBER.value, trade.executed_at
-            ),
-            "Exchange": AttributeMapping(AttributeType.STRING.value, trade.exechange),
-            "Size": AttributeMapping(AttributeType.NUMBER.value, trade.size),
-            "Price": AttributeMapping(AttributeType.NUMBER.value, trade.price),
-            "ProducerProcessedAt": AttributeMapping(
-                AttributeType.NUMBER.value, trade.producer_processed_at
-            ),
+            "Ticker": {AttributeType.STRING.value: trade.ticker},
+            "ExecutedAt": {AttributeType.NUMBER.value: trade.executed_at},
+            "Exchange": {AttributeType.STRING.value: trade.exchange},
+            "Size": {AttributeType.NUMBER.value: trade.size},
+            "Price": {AttributeType.NUMBER.value: trade.price},
+            "ProducerProcessedAt": {
+                AttributeType.NUMBER.value: trade.producer_processed_at
+            },
         }
 
     def _create_dynamodb_put_request(self, trade: Trade) -> PutRequest:
         attributes = self._create_dynamodb_attributes(trade)
-        item = Item(attributes)
-        return PutRequest(item)
+        item = {"Item": attributes}
+        return {"PutRequest": item}
+
+    @exhaust_unprocessed_items
+    def _put_batch_to_dynamodb(
+        self, request_items: Dict[str, List[PutRequest]]
+    ) -> Dict[str, Any]:
+        client = boto3.client("dynamodb")
+        return client.batch_write_item(RequestItems=request_items)
 
     def put_to_dynamodb(self, table: str) -> None:
         client = boto3.client("dynamodb")
         put_requests = [
             self._create_dynamodb_put_request(trade) for trade in self.trades
         ]
-        request_item = {table: put_requests}
-        client.batch_write_item(RequestItem=request_item)
+        request_items = {table: put_requests}
+        self._put_batch_to_dynamodb(request_items)
 
 
 class RawTrades:
@@ -72,21 +78,23 @@ class RawTrades:
         self.file = file
 
     def _iso8601_date_to_unix(self, date: str) -> float:
-        return datetime.strptime(date, "%Y-%m-%dT%H:%M:%S.%fZ").timestamp()
+        iso_date = date.strip("Z")
+        return datetime.fromisoformat(iso_date).timestamp()
 
     def _parse_trade(self, trade: Dict[str, Union[str, float]]) -> Trade:
         ticker = trade["ticker"]
-        executed_at = self._iso8601_date_to_unix(trade["date"])
+        executed_at = str(self._iso8601_date_to_unix(trade["date"]))
         exchange = trade["exchange"]
-        size = trade["size"]
-        price = trade["price"]
-        producer_processed_at = self._iso8601_date_to_unix(trade["processed_at"])
+        size = str(trade["size"])
+        price = str(trade["price"])
+        producer_processed_at = str(self._iso8601_date_to_unix(trade["processed_at"]))
         return Trade(ticker, executed_at, exchange, size, price, producer_processed_at)
 
     def parse(self) -> TradeList:
         lines = [line.decode("utf-8").strip("\n") for line in self.file.readlines()]
         trades = [json.loads(line) for line in lines]
-        return TradeList([self._parse_trade(trade) for trade in trades])
+        parsed_trades = [self._parse_trade(trade) for trade in trades]
+        return TradeList(parsed_trades)
 
 
 class CompressedTrades(ABC):

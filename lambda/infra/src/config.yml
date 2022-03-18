@@ -3,3 +3,4 @@ Variables:
   Project: crypto
 Resources:
   DynamoDbTableName: TiingoTrade
+  S3Source: s3-jamie-general-data-lake
