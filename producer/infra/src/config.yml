@@ -9,4 +9,4 @@ Resources:
   SecretsManagerSecret: TiingoApiToken
 Producer:
   TiingoApiUrl: wss://api.tiingo.com/crypto
-  FirehoseBatchSize: "1000"
+  FirehoseBatchSize: "2000"
